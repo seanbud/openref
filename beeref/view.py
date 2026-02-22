@@ -75,6 +75,7 @@ class BeeGraphicsView(MainControlsMixin,
         self.draw_brush_size = 10.0
         self.draw_brush_color = [0, 0, 0, 255]
         self._tablet_pressure = 1.0
+        self._suppress_context_menu = False
 
         self.scene = BeeGraphicsScene(self.undo_stack)
         self.scene.changed.connect(self.on_scene_changed)
@@ -162,6 +163,9 @@ class BeeGraphicsView(MainControlsMixin,
         self.update_window_title()
 
     def on_context_menu(self, point):
+        if self._suppress_context_menu:
+            self._suppress_context_menu = False
+            return
         self.context_menu.exec(self.mapToGlobal(point))
 
     def get_supported_image_formats(self, cls):
@@ -430,10 +434,9 @@ class BeeGraphicsView(MainControlsMixin,
                 self.draw_current_stroke = None
             if commit and self.draw_item.strokes:
                 self.scene.removeItem(self.draw_item)
-                pos = self.draw_item.pos()
                 self.undo_stack.push(
                     commands.InsertItems(
-                        self.scene, [self.draw_item], pos))
+                        self.scene, [self.draw_item]))
             else:
                 self.scene.removeItem(self.draw_item)
             self.draw_item = None
@@ -921,6 +924,7 @@ class BeeGraphicsView(MainControlsMixin,
     def mousePressEvent(self, event):
         if self.active_mode == self.DRAW_MODE:
             if event.button() == Qt.MouseButton.RightButton:
+                self._suppress_context_menu = True
                 self.exit_draw_mode(commit=True)
                 event.accept()
                 return
@@ -930,6 +934,7 @@ class BeeGraphicsView(MainControlsMixin,
                     self.draw_item = BeePathItem()
                     self.draw_item.setPos(scene_pos)
                     self.scene.addItem(self.draw_item)
+                    self.draw_item.bring_to_front()
                 local_pos = self.draw_item.mapFromScene(scene_pos)
                 self.draw_current_stroke = {
                     'color': list(self.draw_brush_color),
