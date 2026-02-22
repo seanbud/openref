@@ -1001,6 +1001,7 @@ class BeeGraphicsView(MainControlsMixin,
                 'y': round(local_pos.y(), 1),
                 'pressure': self._tablet_pressure,
             })
+            self.draw_item.prepareGeometryChange()
             self.draw_item.temp_stroke = self.draw_current_stroke
             self.draw_item.update()
             event.accept()

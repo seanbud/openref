@@ -781,7 +781,14 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         return self.boundingRect().contains(point)
 
     def bounding_rect_unselected(self):
-        return QtCore.QRectF(self._cached_rect)
+        rect = QtCore.QRectF(self._cached_rect)
+        if self.temp_stroke:
+            base_size = self.temp_stroke.get('base_size', 10)
+            for pt in self.temp_stroke.get('points', []):
+                r = base_size * pt.get('pressure', 1.0) / 2 + 1
+                rect = rect.united(QtCore.QRectF(
+                    pt['x'] - r, pt['y'] - r, 2 * r, 2 * r))
+        return rect
 
     def add_stroke(self, stroke):
         self.prepareGeometryChange()
