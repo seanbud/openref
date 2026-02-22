@@ -423,6 +423,8 @@ class BeeGraphicsView(MainControlsMixin,
         self.scene.deselect_all_items()
         self.active_mode = self.DRAW_MODE
         self.viewport().setCursor(Qt.CursorShape.CrossCursor)
+        self.setFocus()
+        self.welcome_overlay.hide()
         logger.debug('Entered draw mode')
 
     def exit_draw_mode(self, commit=True):
