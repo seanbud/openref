@@ -72,8 +72,8 @@ class BeeGraphicsView(MainControlsMixin,
         self.active_mode = None
         self.draw_item = None
         self.draw_current_stroke = None
-        self.draw_brush_size = 10.0
-        self.draw_brush_color = [0, 0, 0, 255]
+        self.draw_brush_size = 20.0
+        self.draw_brush_color = [200, 200, 200, 255]
         self._tablet_pressure = 1.0
         self._suppress_context_menu = False
 
