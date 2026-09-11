@@ -208,16 +208,54 @@ class ThemeWidget(RadioGroup):
     )
 
 
-class DrawingToolbarPositionWidget(RadioGroup):
+class DrawingToolbarPositionWidget(GroupBase):
     TITLE = 'Drawing Toolbar Position:'
-    HELPTEXT = 'Choose where drawing controls sit inside the canvas.'
+    HELPTEXT = 'Anchor drawing controls to any canvas edge or corner.'
     KEY = 'Appearance/drawing_toolbar_position'
-    OPTIONS = (
-        ('bottom-right', 'Bottom right', 'OpenRef default.'),
-        ('bottom-left', 'Bottom left', 'Place controls near the lower left.'),
-        ('top-right', 'Top right', 'Place controls near the upper right.'),
-        ('top-left', 'Top left', 'Place controls near the upper left.'),
+
+    POSITIONS = (
+        ('top-left', '↖', 0, 0),
+        ('top-center', '↑', 0, 1),
+        ('top-right', '↗', 0, 2),
+        ('middle-left', '←', 1, 0),
+        ('middle-right', '→', 1, 2),
+        ('bottom-left', '↙', 2, 0),
+        ('bottom-center', '↓', 2, 1),
+        ('bottom-right', '↘', 2, 2),
     )
+
+    def __init__(self):
+        super().__init__()
+        self.ignore_value_changed = True
+        self.buttons = {}
+        self.button_group = QtWidgets.QButtonGroup(self)
+        self.button_group.setExclusive(True)
+        grid = QtWidgets.QGridLayout()
+        grid.setSpacing(4)
+        current = self.settings.valueOrDefault(self.KEY)
+        for value, glyph, row, column in self.POSITIONS:
+            button = QtWidgets.QToolButton(self)
+            button.setText(glyph)
+            button.setCheckable(True)
+            button.setFixedSize(34, 30)
+            button.setToolTip(value.replace('-', ' ').title())
+            button.toggled.connect(
+                lambda checked, choice=value:
+                checked and self.on_value_changed(choice))
+            button.setChecked(value == current)
+            self.button_group.addButton(button)
+            self.buttons[value] = button
+            grid.addWidget(button, row, column)
+        center = QtWidgets.QLabel('●')
+        center.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        center.setEnabled(False)
+        grid.addWidget(center, 1, 1)
+        self.layout.addLayout(grid)
+        self.layout.addStretch(100)
+        self.ignore_value_changed = False
+
+    def set_value(self, value):
+        self.buttons[value].setChecked(True)
 
 
 class SettingsDialog(QtWidgets.QDialog):

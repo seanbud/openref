@@ -155,6 +155,15 @@ def test_toolbar_position_saves_selection(settings, view):
         'Appearance/drawing_toolbar_position') == 'top-left'
 
 
+def test_toolbar_position_offers_all_eight_canvas_anchors(settings, view):
+    widget = DrawingToolbarPositionWidget()
+    assert set(widget.buttons) == {
+        'top-left', 'top-center', 'top-right',
+        'middle-left', 'middle-right',
+        'bottom-left', 'bottom-center', 'bottom-right',
+    }
+
+
 @patch('PyQt6.QtWidgets.QMessageBox.question',
        return_value=QtWidgets.QMessageBox.StandardButton.Yes)
 def test_settings_dialog_on_restore_defaults(msg_mock, settings, view):

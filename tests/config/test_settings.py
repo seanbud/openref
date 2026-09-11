@@ -106,6 +106,17 @@ def test_invalid_appearance_values_use_defaults(settings):
         'Appearance/drawing_toolbar_position') == 'bottom-right'
 
 
+@pytest.mark.parametrize('position', (
+    'top-left', 'top-center', 'top-right',
+    'middle-left', 'middle-right',
+    'bottom-left', 'bottom-center', 'bottom-right',
+))
+def test_all_toolbar_anchor_positions_are_supported(settings, position):
+    settings.setValue('Appearance/drawing_toolbar_position', position)
+    assert settings.valueOrDefault(
+        'Appearance/drawing_toolbar_position') == position
+
+
 @pytest.mark.parametrize(
     'theme', ('sakura', 'ocean', 'forest', 'paper'))
 def test_additional_themes_are_supported(settings, theme):

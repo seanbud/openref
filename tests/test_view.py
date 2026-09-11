@@ -73,6 +73,16 @@ def test_on_scene_changed_when_no_items(show_mock, view):
         assert view.get_scale() == 1
 
 
+@patch('beeref.widgets.welcome_overlay.WelcomeOverlay.hide')
+def test_empty_established_canvas_does_not_return_to_welcome(hide_mock, view):
+    view.scene.set_used_space_rect(QtCore.QRectF(0, 0, 500, 400))
+
+    view.on_scene_changed(None)
+
+    hide_mock.assert_called_once_with()
+    assert view.scene.used_space_rect == QtCore.QRectF(0, 0, 500, 400)
+
+
 def test_get_supported_image_formats_for_reading(view):
     formats = view.get_supported_image_formats(QtGui.QImageReader)
     assert '*.png' in formats
@@ -1513,6 +1523,16 @@ def test_right_click_opens_context_menu_only_on_release(view):
     release.position.return_value = QtCore.QPointF(22, 24)
     view.mouseReleaseEvent(release)
     view.on_context_menu.assert_called_once_with(QtCore.QPoint(22, 24))
+
+
+def test_native_context_event_is_suppressed(view):
+    event = MagicMock()
+
+    view.contextMenuEvent(event)
+
+    event.accept.assert_called_once_with()
+    assert (view.contextMenuPolicy()
+            == Qt.ContextMenuPolicy.NoContextMenu)
 
 
 def test_meaningful_right_drag_suppresses_context_menu(view):

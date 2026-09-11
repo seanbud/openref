@@ -37,9 +37,10 @@ class MainControlsMixin:
 
     def init_main_controls(self, main_window):
         self.main_window = main_window
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.customContextMenuRequested.connect(
-            self.control_target.on_context_menu)
+        # Native context-menu events fire on press on some macOS input
+        # devices. Mouse release below is the single source of truth so a
+        # right-drag can never be interrupted by a menu.
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.setAcceptDrops(True)
         self.movewin_active = False
         self.right_window_drag_active = False
@@ -154,7 +155,7 @@ class MainControlsMixin:
         if self.right_click_pending:
             current = event.globalPosition().toPoint()
             delta = current - self.event_start.toPoint()
-            if delta.manhattanLength() >= 6:
+            if delta.manhattanLength() >= 4:
                 self.right_window_dragged = True
                 if self._right_restore_on_drag:
                     from beeref.actions import actions
@@ -184,6 +185,11 @@ class MainControlsMixin:
                                   self.main_window.y() + int(delta.y()))
             event.accept()
             return True
+
+    def contextMenuEvent(self, event):
+        """Suppress platform-native press-time context-menu dispatch."""
+
+        event.accept()
 
     def mouseReleaseEventMainControls(self, event):
         if self.right_click_pending:

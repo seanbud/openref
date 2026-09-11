@@ -67,6 +67,12 @@ Fixed
 * macOS Command-to-erase recognizes Qt's platform-specific modifier mapping.
 * Used canvas space is always repainted as one enclosing rectangle, and the
   eraser preview now has a short, tapered fade.
+* New strokes no longer become selected, entering Draw always starts with the
+  Pen, and erasing the final item preserves the established canvas.
+* macOS right-drag is no longer interrupted by native press-time context menus.
+* The drawing dock remains screen-anchored while zooming and now offers eight
+  edge and corner placements through a compact anchor control.
+* Replaced the drawing dock's pen-nib mark with a simpler angled pencil icon.
 
 The drawing foundation was contributed by Cinderflame-Linear in PR #150.
 Performance work draws from PR #154 by Feihei, and command-line parsing from

@@ -69,6 +69,17 @@ def test_insert_items_ignore_first_redo(view):
     item2.zValue() > 5
 
 
+def test_insert_items_can_leave_new_item_unselected(view):
+    item = BeePixmapItem(QtGui.QImage())
+    command = commands.InsertItems(
+        view.scene, [item], select_items=False)
+
+    command.redo()
+
+    assert item.scene() is view.scene
+    assert item.isSelected() is False
+
+
 def test_delete_items(view):
     view.scene.update_selection = MagicMock()
     item1 = BeePixmapItem(QtGui.QImage())

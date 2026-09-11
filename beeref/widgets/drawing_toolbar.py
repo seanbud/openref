@@ -46,20 +46,24 @@ class CanvasToolButton(QtWidgets.QToolButton):
         kind = self.icon_kind
 
         if kind == 'pen':
-            nib = QtGui.QPainterPath()
-            nib.moveTo(20, 6)
-            nib.lineTo(31, 19)
-            nib.lineTo(20, 34)
-            nib.lineTo(9, 19)
-            nib.closeSubpath()
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QtGui.QPen(color, 2.4,
-                                      join=Qt.PenJoinStyle.RoundJoin))
-            painter.drawPath(nib)
-            painter.drawLine(QtCore.QPointF(20, 14),
-                             QtCore.QPointF(20, 27))
+            painter.save()
+            painter.translate(20, 19)
+            painter.rotate(42)
+            painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(color)
-            painter.drawEllipse(QtCore.QPointF(20, 27), 2.2, 2.2)
+            painter.drawRoundedRect(QtCore.QRectF(-4, -13, 8, 20), 2, 2)
+            painter.setBrush(QtGui.QColor('#aeb2b8'))
+            painter.drawRoundedRect(QtCore.QRectF(-4, -14, 8, 4), 1, 1)
+            tip = QtGui.QPainterPath()
+            tip.moveTo(-4, 7)
+            tip.lineTo(4, 7)
+            tip.lineTo(0, 14)
+            tip.closeSubpath()
+            painter.setBrush(self.accent)
+            painter.drawPath(tip)
+            painter.setBrush(QtGui.QColor('#ececee'))
+            painter.drawEllipse(QtCore.QPointF(0, 12.5), 1.2, 1.2)
+            painter.restore()
         elif kind == 'line':
             painter.drawLine(QtCore.QPointF(10, 30),
                              QtCore.QPointF(30, 10))

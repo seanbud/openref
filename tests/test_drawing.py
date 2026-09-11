@@ -39,7 +39,17 @@ def test_each_completed_stroke_is_a_separate_item(view):
                 if isinstance(item, BeePathItem)]
     assert len(drawings) == 2
     assert all(len(item.strokes) == 1 for item in drawings)
+    assert not any(item.isSelected() for item in drawings)
     assert view.draw_item is None
+
+
+def test_entering_new_draw_session_always_resets_to_pen(view):
+    view.set_draw_tool('eraser')
+
+    view.enter_draw_mode()
+
+    assert view.draw_tool == 'pen'
+    assert view.draw_toolbar.tool_button.icon_kind == 'pen'
 
 
 def test_edit_existing_drawing_is_undoable(view):

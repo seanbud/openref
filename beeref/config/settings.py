@@ -154,7 +154,9 @@ class BeeSettings(QtCore.QSettings):
         'Appearance/drawing_toolbar_position': {
             'default': 'bottom-right',
             'validate': lambda x: x in (
-                'bottom-right', 'bottom-left', 'top-right', 'top-left'),
+                'top-left', 'top-center', 'top-right',
+                'middle-left', 'middle-right',
+                'bottom-left', 'bottom-center', 'bottom-right'),
             'post_save_callback': (
                 lambda value: settings_events.appearance_changed.emit()),
         }

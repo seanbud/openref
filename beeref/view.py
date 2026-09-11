@@ -117,6 +117,7 @@ class BeeGraphicsView(MainControlsMixin,
         self.init_main_controls(main_window=parent)
         self.draw_toolbar = widgets.drawing_toolbar.DrawingToolbar(
             self.viewport())
+        self.viewport().installEventFilter(self)
         self.draw_toolbar.tool_changed.connect(self.set_draw_tool)
         self.draw_toolbar.style_changed.connect(self.set_draw_style)
         self.draw_toolbar.width_changed.connect(self.set_draw_width)
@@ -212,7 +213,8 @@ class BeeGraphicsView(MainControlsMixin,
         self.parent.setWindowTitle(title)
 
     def on_scene_changed(self, region):
-        if not self.scene.items():
+        canvas_exists = not self.scene.used_space_rect.isEmpty()
+        if not self.scene.items() and not canvas_exists:
             logger.debug('No items in scene')
             self.setTransform(QtGui.QTransform())
             self.welcome_overlay.setFocus()
@@ -223,8 +225,11 @@ class BeeGraphicsView(MainControlsMixin,
             self.setFocus()
             self.welcome_overlay.clearFocus()
             self.welcome_overlay.hide()
-            self.actiongroup_set_enabled('active_when_items_in_scene', True)
-            self.scene.expand_used_space()
+            has_items = bool(self.scene.items())
+            self.actiongroup_set_enabled(
+                'active_when_items_in_scene', has_items)
+            if has_items:
+                self.scene.expand_used_space()
         self.recalc_scene_rect()
 
     def on_can_redo_changed(self, can_redo):
@@ -258,6 +263,7 @@ class BeeGraphicsView(MainControlsMixin,
         self.undo_stack.clear()
         self.filename = None
         self.setTransform(QtGui.QTransform())
+        self.on_scene_changed(None)
 
     def reset_previous_transform(self, toggle_item=None):
         if (self.previous_transform
@@ -610,6 +616,7 @@ class BeeGraphicsView(MainControlsMixin,
         self._draw_original_strokes = (
             copy.deepcopy(item.strokes) if item is not None else None)
         self.active_mode = self.DRAW_MODE
+        self.set_draw_tool('pen', announce=False)
         self.viewport().setCursor(Qt.CursorShape.CrossCursor)
         self.setFocus()
         self.welcome_overlay.hide()
@@ -733,19 +740,29 @@ class BeeGraphicsView(MainControlsMixin,
         self.command_palette.open()
 
     def _position_draw_toolbar(self):
-        hint = self.draw_toolbar.sizeHint()
+        self.draw_toolbar.adjustSize()
+        hint = self.draw_toolbar.size()
         margin = 12
         position = self.settings.valueOrDefault(
             'Appearance/drawing_toolbar_position')
-        on_right = position.endswith('right')
-        on_bottom = position.startswith('bottom')
-        x = (self.viewport().width() - hint.width() - margin
-             if on_right else margin)
-        y = (self.viewport().height() - hint.height() - margin
-             if on_bottom else margin)
+        vertical, horizontal = position.split('-')
+        if horizontal == 'left':
+            x = margin
+        elif horizontal == 'right':
+            x = self.viewport().width() - hint.width() - margin
+        else:
+            x = (self.viewport().width() - hint.width()) // 2
+        if vertical == 'top':
+            y = margin
+        elif vertical == 'bottom':
+            y = self.viewport().height() - hint.height() - margin
+        else:
+            y = (self.viewport().height() - hint.height()) // 2
         x = max(margin, x)
         y = max(margin, y)
         self.draw_toolbar.move(x, y)
+        if self.draw_toolbar.isVisible():
+            self.draw_toolbar.raise_()
 
     def on_appearance_changed(self):
         from beeref.theme import apply_theme
@@ -1326,6 +1343,7 @@ class BeeGraphicsView(MainControlsMixin,
 
         self.pan(self.mapFromScene(ref_point) - anchor)
         self.reset_previous_transform()
+        self._position_draw_toolbar()
 
     def wheelEvent(self, event):
         action, inverted\
@@ -1353,6 +1371,9 @@ class BeeGraphicsView(MainControlsMixin,
             return
 
     def viewportEvent(self, event):
+        if (event.type() == QtCore.QEvent.Type.Resize
+                and hasattr(self, 'draw_toolbar')):
+            QtCore.QTimer.singleShot(0, self._position_draw_toolbar)
         if event.type() == QtCore.QEvent.Type.NativeGesture:
             gesture = event.gestureType()
             if gesture == Qt.NativeGestureType.ZoomNativeGesture:
@@ -1612,7 +1633,7 @@ class BeeGraphicsView(MainControlsMixin,
                 completed_item = self.draw_item
                 self.scene.removeItem(completed_item)
                 self.undo_stack.push(commands.InsertItems(
-                    self.scene, [completed_item]))
+                    self.scene, [completed_item], select_items=False))
                 self.draw_item = None
             event.accept()
             return
