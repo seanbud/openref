@@ -117,8 +117,9 @@ jobs:
           ln -s /Applications dist/dmg/Applications
           hdiutil create -volname OpenRef -srcfolder dist/dmg \
             -ov -format UDZO dist/OpenRef-macOS-arm64.dmg
-          shasum -a 256 dist/OpenRef-macOS-arm64.dmg \
-            > dist/OpenRef-macOS-arm64-SHA256.txt
+          cd dist
+          shasum -a 256 OpenRef-macOS-arm64.dmg \
+            > OpenRef-macOS-arm64-SHA256.txt
 
       - name: Notarize signed DMG
         if: >-
