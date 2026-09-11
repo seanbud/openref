@@ -410,7 +410,7 @@ actions = ActionList([
         id='show_titlebar',
         text='Show &Title Bar',
         checkable=True,
-        checked=True,
+        checked=False,
         settings='View/show_titlebar',
         callback='on_action_show_titlebar',
     ),

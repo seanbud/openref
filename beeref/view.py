@@ -1350,7 +1350,8 @@ class BeeGraphicsView(MainControlsMixin,
 
     def mousePressEvent(self, event):
         if (event.button() == Qt.MouseButton.RightButton
-                and self.parent.isFullScreen()):
+                and self.parent.isFullScreen()
+                and not sys.platform.startswith('win')):
             self._right_canvas_panning = True
             self.event_start = event.position()
             self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)

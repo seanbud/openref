@@ -1501,8 +1501,9 @@ def test_right_drag_moves_unlocked_window(move_mock, view):
     assert view.right_window_drag_active is False
 
 
+@patch('beeref.view.sys.platform', 'darwin')
 @patch('beeref.view.BeeGraphicsView.pan')
-def test_right_drag_pans_canvas_in_fullscreen(pan_mock, view):
+def test_right_drag_pans_canvas_in_fullscreen_on_macos(pan_mock, view):
     view.parent.isFullScreen = MagicMock(return_value=True)
     press = MagicMock()
     press.button.return_value = Qt.MouseButton.RightButton
@@ -1517,6 +1518,27 @@ def test_right_drag_pans_canvas_in_fullscreen(pan_mock, view):
 
     pan_mock.assert_called_once_with(QtCore.QPointF(10, 16))
     assert view._right_canvas_panning is False
+
+
+@patch('beeref.main_controls.sys.platform', 'win32')
+@patch('beeref.view.sys.platform', 'win32')
+@patch('PyQt6.QtWidgets.QWidget.move')
+def test_right_drag_restores_and_moves_fullscreen_window_on_windows(
+        move_mock, view):
+    view.parent.isFullScreen = MagicMock(return_value=True)
+    view.parent.showNormal = MagicMock()
+    press = MagicMock()
+    press.button.return_value = Qt.MouseButton.RightButton
+    press.globalPosition.return_value = QtCore.QPointF(100, 100)
+
+    view.mousePressEvent(press)
+    move = MagicMock()
+    move.globalPosition.return_value = QtCore.QPointF(112, 108)
+    view.mouseMoveEvent(move)
+
+    view.parent.showNormal.assert_called_once_with()
+    assert move_mock.called
+    assert view.right_window_drag_active is True
 
 
 def test_lock_window_action_controls_right_drag(view):

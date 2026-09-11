@@ -106,9 +106,11 @@ def test_invalid_appearance_values_use_defaults(settings):
         'Appearance/drawing_toolbar_position') == 'bottom-right'
 
 
-def test_sakura_is_a_supported_theme(settings):
-    settings.setValue('Appearance/theme', 'sakura')
-    assert settings.valueOrDefault('Appearance/theme') == 'sakura'
+@pytest.mark.parametrize(
+    'theme', ('sakura', 'ocean', 'forest', 'paper'))
+def test_additional_themes_are_supported(settings, theme):
+    settings.setValue('Appearance/theme', theme)
+    assert settings.valueOrDefault('Appearance/theme') == theme
 
 
 def test_settings_value_or_default_gets_overriden_value(settings):

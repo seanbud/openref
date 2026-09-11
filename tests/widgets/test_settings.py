@@ -1,5 +1,7 @@
 from unittest.mock import patch
 
+import pytest
+
 from PyQt6 import QtWidgets
 
 from beeref.widgets.settings import (
@@ -132,11 +134,13 @@ def test_theme_widget_saves_selection(settings, view):
     assert settings.valueOrDefault('Appearance/theme') == 'light'
 
 
-def test_theme_widget_offers_sakura(settings, view):
+@pytest.mark.parametrize(
+    'theme', ('sakura', 'ocean', 'forest', 'paper'))
+def test_theme_widget_offers_additional_themes(settings, view, theme):
     widget = ThemeWidget()
-    widget.set_value('sakura')
-    assert widget.buttons['sakura'].isChecked()
-    assert settings.valueOrDefault('Appearance/theme') == 'sakura'
+    widget.set_value(theme)
+    assert widget.buttons[theme].isChecked()
+    assert settings.valueOrDefault('Appearance/theme') == theme
 
 
 def test_toolbar_position_defaults_to_bottom_right(settings, view):

@@ -14,6 +14,7 @@ def test_beeref_mainwindow_init(show_mock, qapp):
     assert BeeAssets().logo == BeeAssets().logo
     assert window.windowIcon()
     assert window.contentsMargins() == QtCore.QMargins(1, 1, 1, 1)
+    assert window.windowFlags() & QtCore.Qt.WindowType.FramelessWindowHint
     assert isinstance(window.view, BeeGraphicsView)
     show_mock.assert_called()
 

@@ -197,6 +197,12 @@ class ThemeWidget(RadioGroup):
          'Neutral low-chroma surfaces for color-critical work.'),
         ('sakura', 'Sakura',
          'Ink-dark plum surfaces with soft blossom accents.'),
+        ('ocean', 'Deep Ocean',
+         'Near-black navy surfaces with clear turquoise accents.'),
+        ('forest', 'Forest',
+         'Evergreen surfaces with quiet moss and fern accents.'),
+        ('paper', 'Warm Paper',
+         'A warm, low-glare light workspace with ink-blue controls.'),
         ('light', 'Soft Light',
          'A bright interface with a dark canvas and drawing dock.'),
     )

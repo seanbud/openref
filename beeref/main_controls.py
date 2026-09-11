@@ -14,6 +14,7 @@
 # along with BeeRef.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import sys
 
 from PyQt6 import QtCore, QtGui
 from PyQt6.QtCore import Qt
@@ -125,6 +126,19 @@ class MainControlsMixin:
         target = self.control_target
         fullscreen = bool(target.parent.isFullScreen())
         locked = getattr(target, 'window_position_locked', False)
+        if (event.button() == Qt.MouseButton.RightButton
+                and fullscreen and not locked
+                and sys.platform.startswith('win')):
+            # On Windows a right-drag tears the fullscreen canvas back into
+            # a movable window and keeps it attached to the pointer.
+            from beeref.actions import actions
+
+            fullscreen_action = actions.actions['fullscreen'].qaction
+            if fullscreen_action and fullscreen_action.isChecked():
+                fullscreen_action.setChecked(False)
+            else:
+                target.parent.showNormal()
+            fullscreen = False
         if (event.button() == Qt.MouseButton.RightButton
                 and not fullscreen and not locked):
             self.right_window_drag_active = True

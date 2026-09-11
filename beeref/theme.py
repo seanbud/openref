@@ -157,6 +157,9 @@ THEME_STYLESHEETS = {
         #commandList::item:selected { background: #236d78; }
         #BeeNotification { background: rgba(17, 27, 36, 245); }
         #notificationShortcut { background: #12232e; border-color: #315266; }
+        #welcomeOverlay { background: #0b1015; }
+        #welcomeBrowse { background: #168da8; }
+        #welcomeBrowse:hover { background: #20a4c1; }
         QPushButton { background: #243746; border-color: #3b5569; }
         QPushButton:hover { background: #2e485b; }
     """,
@@ -194,8 +197,126 @@ THEME_STYLESHEETS = {
         #notificationShortcut { background: #3a2632; border-color: #75495d; }
         #primaryButton { background: #ce668c; }
         #primaryButton:hover { background: #df789d; }
+        #welcomeOverlay { background: #151015; }
+        #welcomeBrowse { background: #ce668c; }
+        #welcomeBrowse:hover { background: #df789d; }
         QPushButton { background: #4a313e; border-color: #70495b; }
         QPushButton:hover { background: #5b3b4a; }
+    """,
+    'ocean': """
+        QWidget { color: #e5f4f5; }
+        QMenuBar, QMenu, QDialog, QMessageBox { background: #10262c; }
+        QMenuBar::item:selected, QMenu::item:selected { background: #1d4850; }
+        QMenu::separator { background: #285862; }
+        #drawingToolbar {
+            background: rgba(11, 35, 42, 248);
+            border: 1px solid #02090b;
+            border-radius: 12px;
+        }
+        #drawingToolbar QToolButton:hover, #drawPopover QToolButton:hover,
+        #windowChrome QToolButton:hover { background: #1c4b54; }
+        #drawingToolbar QToolButton:checked, #drawPopover QToolButton:checked,
+        #windowChrome QToolButton:checked { background: #24727b; }
+        #windowChrome {
+            background: rgba(10, 31, 38, 250);
+            border-bottom: 1px solid #02090b;
+        }
+        #dialogCard, #commandPalette, #colorDialog {
+            background: #112b32; border: 1px solid #041014;
+        }
+        #commandSearch, #colorHex, #colorOpacity, QLineEdit, QSpinBox,
+        QComboBox, QListView, QPlainTextEdit {
+            background: #0b2026; border-color: #2c626b;
+        }
+        #commandList::item:selected { background: #1b6871; }
+        #BeeNotification { background: rgba(10, 34, 41, 245); }
+        #notificationShortcut { background: #123942; border-color: #2d6972; }
+        #primaryButton { background: #28a9ad; }
+        #primaryButton:hover { background: #35bec1; }
+        #welcomeOverlay { background: #071317; }
+        #welcomeBrowse { background: #28a9ad; }
+        #welcomeBrowse:hover { background: #35bec1; }
+        QPushButton { background: #193f47; border-color: #2e6069; }
+        QPushButton:hover { background: #21515b; }
+    """,
+    'forest': """
+        QWidget { color: #edf1e6; }
+        QMenuBar, QMenu, QDialog, QMessageBox { background: #20291f; }
+        QMenuBar::item:selected, QMenu::item:selected { background: #3c4d37; }
+        QMenu::separator { background: #4a5d44; }
+        #drawingToolbar {
+            background: rgba(27, 37, 27, 248);
+            border: 1px solid #070a07;
+            border-radius: 12px;
+        }
+        #drawingToolbar QToolButton:hover, #drawPopover QToolButton:hover,
+        #windowChrome QToolButton:hover { background: #40513a; }
+        #drawingToolbar QToolButton:checked, #drawPopover QToolButton:checked,
+        #windowChrome QToolButton:checked { background: #63784e; }
+        #windowChrome {
+            background: rgba(27, 36, 26, 250);
+            border-bottom: 1px solid #070a07;
+        }
+        #dialogCard, #commandPalette, #colorDialog {
+            background: #263125; border: 1px solid #0b0e0a;
+        }
+        #commandSearch, #colorHex, #colorOpacity, QLineEdit, QSpinBox,
+        QComboBox, QListView, QPlainTextEdit {
+            background: #192118; border-color: #53664b;
+        }
+        #commandList::item:selected { background: #586f48; }
+        #BeeNotification { background: rgba(32, 43, 31, 245); }
+        #notificationShortcut { background: #33422f; border-color: #607355; }
+        #primaryButton { background: #7d9b5c; }
+        #primaryButton:hover { background: #8ead69; }
+        #welcomeOverlay { background: #111711; }
+        #welcomeBrowse { background: #718d54; }
+        #welcomeBrowse:hover { background: #829f61; }
+        QPushButton { background: #3b4a36; border-color: #5b6b51; }
+        QPushButton:hover { background: #485a41; }
+    """,
+    'paper': """
+        QWidget { color: #302d29; }
+        QMenuBar, QMenu, QDialog, QMessageBox { background: #eee8dc; }
+        #openRefWindow { background: #1b1916; }
+        QMenuBar::item:selected, QMenu::item:selected { background: #d9d0c0; }
+        QMenu { border-color: #9f9584; }
+        QMenu::separator { background: #c8beae; }
+        #drawingToolbar {
+            background: rgba(38, 47, 55, 248);
+            border: 1px solid #080a0c;
+            border-radius: 12px;
+        }
+        #drawingToolbar QToolButton:hover, #drawPopover QToolButton:hover,
+        #windowChrome QToolButton:hover { background: #465866; }
+        #drawingToolbar QToolButton:checked, #drawPopover QToolButton:checked,
+        #windowChrome QToolButton:checked { background: #607886; }
+        #windowChrome {
+            background: rgba(231, 224, 211, 250);
+            border-bottom: 1px solid #8f8678;
+        }
+        #dialogCard, #commandPalette, #colorDialog {
+            background: #f3eee5; border-color: #9f9584;
+        }
+        #commandSearch, #colorHex, #colorOpacity, QLineEdit, QSpinBox,
+        QComboBox, QListView, QPlainTextEdit {
+            background: #fffaf1; border-color: #b7ad9d;
+        }
+        #commandList::item:selected { background: #c7d8dc; color: #24343a; }
+        #BeeNotification { background: rgba(242, 237, 227, 245); }
+        #notificationText, #notificationIcon { color: #302d29; }
+        #notificationShortcut {
+            color: #42545b; background: #ded8cd; border-color: #aaa194;
+        }
+        #dialogClose { color: #302d29; }
+        #primaryButton { background: #477f91; }
+        #primaryButton:hover { background: #5793a5; }
+        #welcomeOverlay { background: #d1c9bd; }
+        #welcomeMessage, #welcomeHelp { color: #71695f; }
+        #welcomeBrowse { background: #477f91; }
+        #welcomeBrowse:hover { background: #5793a5; }
+        QPushButton { background: #ddd5c8; border-color: #ada394; }
+        QPushButton:hover { background: #cec4b5; }
     """,
     'light': """
         QWidget { color: #20252b; }
@@ -227,6 +348,8 @@ THEME_STYLESHEETS = {
             color: #394650; background: #dde4e9; border-color: #aab6bf;
         }
         #dialogClose { color: #20252b; }
+        #welcomeOverlay { background: #d9dde0; }
+        #welcomeMessage, #welcomeHelp { color: #687078; }
         QPushButton { background: #dde3e8; border-color: #aeb8c0; }
         QPushButton:hover { background: #ccd6dd; }
     """,
@@ -240,6 +363,9 @@ def available_themes():
         ('midnight', 'OpenRef Midnight'),
         ('graphite', 'Graphite'),
         ('sakura', 'Sakura'),
+        ('ocean', 'Deep Ocean'),
+        ('forest', 'Forest'),
+        ('paper', 'Warm Paper'),
         ('light', 'Soft Light'),
     )
 
@@ -248,6 +374,9 @@ CANVAS_COLORS = {
     'midnight': ('#0b1015', '#121b23'),
     'graphite': ('#121212', '#1a1a1a'),
     'sakura': ('#151015', '#211820'),
+    'ocean': ('#071317', '#0d2228'),
+    'forest': ('#111711', '#1c251b'),
+    'paper': ('#c8c0b4', '#e6dfd3'),
     'light': ('#d9dde0', '#edf0f2'),
 }
 

@@ -17,8 +17,9 @@ Added
 * Purpose-built pen color picker, hover-revealed frameless window controls,
   and a three-way save/discard/cancel warning.
 * Live pen-color preview in the drawing dock while the color picker is open.
-* OpenRef Midnight, Graphite, Sakura, and Soft Light themes, with configurable
-  drawing toolbar placement in any canvas corner.
+* Seven original interface themes: OpenRef Midnight, Graphite, Sakura, Deep
+  Ocean, Forest, Warm Paper, and Soft Light, with configurable drawing toolbar
+  placement in any canvas corner.
 * In-app license, corresponding-source, and contributor-attribution screens.
 * A fully custom compact HSV/alpha color studio with live drawing-dock preview.
 * Persistent used-canvas bounds: content expands the brighter workspace while
@@ -31,8 +32,8 @@ Changed
 * Renamed the application and public fork to OpenRef, with a distinct desktop
   icon and updated application/package metadata.
 * Refreshed the dark theme and reduced the empty board to Browse and Help.
-* Native title bars are now the default. Frameless canvas mode remains an
-  explicit view option with hover-revealed window controls.
+* The compact frameless canvas and hover-revealed window controls are now the
+  default; a native title bar remains available from the View menu.
 * Reduced canvas UI scale and redrew drawing/chrome icons around OpenRef's own
   visual language, with one-pixel black window and dock outlines.
 * Batched SQLite item writes and accelerated color sampling on large images.
@@ -46,6 +47,9 @@ Changed
 * Windowed right-drag moves an unlocked window, with a persistent lock toggle.
 * Holding Command while drawing with the pen temporarily activates the eraser
   on macOS and restores the pen on release.
+* Right-drag moves windowed canvases on macOS and Windows. In fullscreen,
+  macOS right-drag pans while Windows restores and moves the window. Middle
+  drag consistently pans the canvas on both platforms.
 
 The drawing foundation was contributed by Cinderflame-Linear in PR #150.
 Performance work draws from PR #154 by Feihei, and command-line parsing from
