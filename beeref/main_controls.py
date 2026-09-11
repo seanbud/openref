@@ -44,6 +44,8 @@ class MainControlsMixin:
         self.movewin_active = False
         self.right_window_drag_active = False
         self.right_window_dragged = False
+        self.right_click_pending = False
+        self._right_restore_on_drag = False
 
     def on_action_movewin_mode(self):
         if self.movewin_active:
@@ -126,26 +128,18 @@ class MainControlsMixin:
         target = self.control_target
         fullscreen = bool(target.parent.isFullScreen())
         locked = getattr(target, 'window_position_locked', False)
-        if (event.button() == Qt.MouseButton.RightButton
-                and fullscreen and not locked
-                and sys.platform.startswith('win')):
-            # On Windows a right-drag tears the fullscreen canvas back into
-            # a movable window and keeps it attached to the pointer.
-            from beeref.actions import actions
-
-            fullscreen_action = actions.actions['fullscreen'].qaction
-            if fullscreen_action and fullscreen_action.isChecked():
-                fullscreen_action.setChecked(False)
-            else:
-                target.parent.showNormal()
-            fullscreen = False
-        if (event.button() == Qt.MouseButton.RightButton
-                and not fullscreen and not locked):
-            self.right_window_drag_active = True
+        if event.button() == Qt.MouseButton.RightButton:
+            # A right click is only resolved after release. It becomes a
+            # window drag after a deliberate movement, otherwise it opens the
+            # context menu. This also avoids tearing Windows fullscreen down
+            # for a simple context-menu click.
+            self.right_click_pending = True
+            self._right_restore_on_drag = (
+                fullscreen and not locked and sys.platform.startswith('win'))
+            self.right_window_drag_active = not fullscreen and not locked
             self.right_window_dragged = False
             self.event_start = event.globalPosition()
             self._right_window_origin = self.main_window.pos()
-            self.viewport_or_self.setCursor(Qt.CursorShape.SizeAllCursor)
             event.accept()
             return True
 
@@ -157,12 +151,29 @@ class MainControlsMixin:
             return True
 
     def mouseMoveEventMainControls(self, event):
-        if self.right_window_drag_active:
+        if self.right_click_pending:
             current = event.globalPosition().toPoint()
             delta = current - self.event_start.toPoint()
-            if delta.manhattanLength() >= 3:
+            if delta.manhattanLength() >= 6:
                 self.right_window_dragged = True
-            self.main_window.move(self._right_window_origin + delta)
+                if self._right_restore_on_drag:
+                    from beeref.actions import actions
+
+                    fullscreen_action = actions.actions['fullscreen'].qaction
+                    if fullscreen_action and fullscreen_action.isChecked():
+                        fullscreen_action.setChecked(False)
+                    else:
+                        self.control_target.parent.showNormal()
+                    self._right_restore_on_drag = False
+                    self.right_window_drag_active = True
+                    self._right_window_origin = self.main_window.pos()
+                    self.event_start = event.globalPosition()
+                    delta = QtCore.QPoint()
+                if self.right_window_drag_active:
+                    self.viewport_or_self.setCursor(
+                        Qt.CursorShape.SizeAllCursor)
+            if self.right_window_drag_active and self.right_window_dragged:
+                self.main_window.move(self._right_window_origin + delta)
             event.accept()
             return True
         if self.movewin_active:
@@ -175,10 +186,12 @@ class MainControlsMixin:
             return True
 
     def mouseReleaseEventMainControls(self, event):
-        if self.right_window_drag_active:
+        if self.right_click_pending:
             was_dragged = self.right_window_dragged
+            self.right_click_pending = False
             self.right_window_drag_active = False
             self.right_window_dragged = False
+            self._right_restore_on_drag = False
             self.viewport_or_self.unsetCursor()
             if not was_dragged:
                 point = event.position().toPoint()

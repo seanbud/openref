@@ -172,14 +172,21 @@ class ColorPickerDialog(QtWidgets.QDialog):
         self.setWindowTitle('Stroke color')
         self.setWindowFlags(Qt.WindowType.Dialog
                             | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # Frameless dialogs do not reliably paint their stylesheet background
+        # unless this is explicit (notably on macOS with a translucent parent).
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setModal(True)
         self.setFixedWidth(352)
         self._color = QtGui.QColor(color)
         self._updating = False
+        self._drag_origin = None
+        self._window_origin = None
 
         title = QtWidgets.QLabel('Stroke color', self)
         title.setObjectName('colorDialogHeader')
+        title.setCursor(Qt.CursorShape.SizeAllCursor)
+        title.installEventFilter(self)
         close = QtWidgets.QToolButton(self)
         close.setObjectName('dialogClose')
         close.setText('×')
@@ -255,6 +262,28 @@ class ColorPickerDialog(QtWidgets.QDialog):
         layout.addLayout(buttons)
         self.set_color(color, emit=False)
 
+    def eventFilter(self, watched, event):
+        if watched.objectName() == 'colorDialogHeader':
+            if (event.type() == QtCore.QEvent.Type.MouseButtonPress
+                    and event.button() == Qt.MouseButton.LeftButton):
+                self._drag_origin = event.globalPosition().toPoint()
+                self._window_origin = self.pos()
+                event.accept()
+                return True
+            if (event.type() == QtCore.QEvent.Type.MouseMove
+                    and self._drag_origin is not None
+                    and event.buttons() & Qt.MouseButton.LeftButton):
+                delta = event.globalPosition().toPoint() - self._drag_origin
+                self.move(self._window_origin + delta)
+                event.accept()
+                return True
+            if event.type() == QtCore.QEvent.Type.MouseButtonRelease:
+                self._drag_origin = None
+                self._window_origin = None
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)
+
     def currentColor(self):
         return QtGui.QColor(self._color)
 
@@ -324,12 +353,16 @@ class EraserTrailOverlay(QtWidgets.QWidget):
         super().__init__(parent)
         self.points = []
         self.radius = 8.0
+        self.clock = QtCore.QElapsedTimer()
+        self.refresh = QtCore.QTimer(self)
+        self.refresh.setInterval(16)
+        self.refresh.timeout.connect(self._age_points)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
         self.effect = QtWidgets.QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(self.effect)
         self.fade = QtCore.QPropertyAnimation(self.effect, b'opacity', self)
-        self.fade.setDuration(190)
+        self.fade.setDuration(110)
         self.fade.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
         self.fade.finished.connect(self._clear_after_fade)
         self.hide()
@@ -337,19 +370,30 @@ class EraserTrailOverlay(QtWidgets.QWidget):
     def begin(self, point, radius):
         self.fade.stop()
         self.effect.setOpacity(1.0)
-        self.points = [QtCore.QPointF(point)]
+        self.clock.start()
+        self.points = [(QtCore.QPointF(point), 0)]
         self.radius = max(3.0, float(radius))
         if self.parentWidget():
             self.setGeometry(self.parentWidget().rect())
         self.show()
+        self.refresh.start()
         self.update()
 
     def add_point(self, point):
         point = QtCore.QPointF(point)
         if not self.points or (
-                point - self.points[-1]).manhattanLength() >= 2:
-            self.points.append(point)
+                point - self.points[-1][0]).manhattanLength() >= 2:
+            self.points.append((point, self.clock.elapsed()))
             self.update()
+
+    def _age_points(self):
+        if not self.points:
+            self.refresh.stop()
+            return
+        cutoff = self.clock.elapsed() - 170
+        while len(self.points) > 2 and self.points[1][1] < cutoff:
+            self.points.pop(0)
+        self.update()
 
     def finish(self):
         if not self.points:
@@ -361,10 +405,12 @@ class EraserTrailOverlay(QtWidgets.QWidget):
 
     def cancel(self):
         self.fade.stop()
+        self.refresh.stop()
         self.points = []
         self.hide()
 
     def _clear_after_fade(self):
+        self.refresh.stop()
         self.points = []
         self.hide()
 
@@ -373,18 +419,29 @@ class EraserTrailOverlay(QtWidgets.QWidget):
             return
         painter = QtGui.QPainter(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        pen = QtGui.QPen(QtGui.QColor(188, 192, 199, 125),
-                         self.radius * 2)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        painter.setPen(pen)
-        path = QtGui.QPainterPath(self.points[0])
-        for point in self.points[1:]:
-            path.lineTo(point)
-        painter.drawPath(path)
-        painter.setBrush(QtGui.QColor(224, 226, 230, 75))
-        painter.setPen(QtGui.QPen(QtGui.QColor(248, 249, 250, 150), 1))
-        painter.drawEllipse(self.points[-1], self.radius, self.radius)
+        count = len(self.points)
+        if count == 1:
+            point = self.points[0][0]
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QtGui.QColor(205, 209, 216, 95))
+            painter.drawEllipse(point, self.radius, self.radius)
+            return
+        # Draw individual segments so the trail narrows and disappears
+        # rapidly behind the eraser head instead of looking like a tube.
+        for index in range(1, count):
+            progress = index / max(1, count - 1)
+            color = QtGui.QColor(194, 198, 205,
+                                 round(18 + 105 * progress))
+            pen = QtGui.QPen(color,
+                             self.radius * (0.35 + 1.25 * progress))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(self.points[index - 1][0],
+                             self.points[index][0])
+        head = self.points[-1][0]
+        painter.setBrush(QtGui.QColor(224, 226, 230, 60))
+        painter.setPen(QtGui.QPen(QtGui.QColor(248, 249, 250, 130), 1))
+        painter.drawEllipse(head, self.radius, self.radius)
 
 
 class ChromeButton(QtWidgets.QToolButton):
@@ -555,6 +612,8 @@ class WindowChrome(QtWidgets.QFrame):
         super().mouseDoubleClickEvent(event)
 
     def eventFilter(self, watched, event):
+        if event.type() == QtCore.QEvent.Type.Enter:
+            self.reveal()
         if event.type() == QtCore.QEvent.Type.MouseMove:
             if event.position().y() <= 24:
                 self.reveal()

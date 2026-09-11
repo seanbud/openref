@@ -37,7 +37,9 @@ def test_welcome_overlay_is_canvas_first(qapp):
     overlay.show()
     assert overlay.objectName() == 'welcomeOverlay'
     assert overlay.files_view.isHidden()
-    assert overlay.browse_button.text() == 'Browse'
+    assert overlay.wordmark.text() == 'OpenRef'
+    assert 'Open' in overlay.shortcuts.text()
+    assert not hasattr(overlay, 'browse_button')
 
 
 def test_recent_files_view_size_hint(qapp):
@@ -68,13 +70,13 @@ def test_recent_files_view_on_click(qapp):
     view.open_from_file.assert_called_once_with('bar.bee')
 
 
-def test_welcome_overlay_browse_opens_insert_dialog(qapp):
+def test_welcome_overlay_help_opens_shortcuts(qapp):
     parent = QtWidgets.QMainWindow()
     view = BeeGraphicsView(qapp, parent)
-    view.on_action_insert_images = MagicMock()
+    view.on_action_help = MagicMock()
     overlay = WelcomeOverlay(view)
-    overlay.browse_button.click()
-    view.on_action_insert_images.assert_called_once()
+    overlay.help_button.click()
+    view.on_action_help.assert_called_once()
 
 
 @patch('PyQt6.QtWidgets.QGraphicsView.mousePressEvent')

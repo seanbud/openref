@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from PyQt6 import QtCore
 
@@ -23,6 +23,23 @@ def test_draw_mode_creates_undoable_item(view):
     assert view.draw_toolbar.isHidden()
     view.undo_stack.undo()
     assert drawn_item.scene() is None
+
+
+def test_each_completed_stroke_is_a_separate_item(view):
+    view.enter_draw_mode()
+    for offset in (0, 80):
+        view._begin_mark(QtCore.QPointF(offset, 0))
+        view.draw_current_stroke['points'].append({
+            'x': 40, 'y': 0, 'pressure': 1.0})
+        release = MagicMock()
+        release.button.return_value = QtCore.Qt.MouseButton.LeftButton
+        view.mouseReleaseEvent(release)
+
+    drawings = [item for item in view.scene.items()
+                if isinstance(item, BeePathItem)]
+    assert len(drawings) == 2
+    assert all(len(item.strokes) == 1 for item in drawings)
+    assert view.draw_item is None
 
 
 def test_edit_existing_drawing_is_undoable(view):

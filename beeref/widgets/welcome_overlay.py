@@ -15,6 +15,7 @@
 
 import logging
 import os.path
+import sys
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
@@ -85,40 +86,6 @@ class RecentFilesView(QtWidgets.QListView):
         super().mouseMoveEvent(event)
 
 
-class DropArtwork(QtWidgets.QWidget):
-    """Muted image/drop mark used on an empty canvas."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setFixedSize(130, 108)
-
-    def paintEvent(self, event):
-        painter = QtGui.QPainter(self)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        painter.scale(self.width() / 180, self.height() / 150)
-        color = QtGui.QColor('#666666')
-        pen = QtGui.QPen(color, 4)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setDashPattern([5, 5])
-        painter.setPen(pen)
-        painter.drawRoundedRect(QtCore.QRectF(25, 45, 130, 85), 2, 2)
-        painter.setBrush(QtGui.QColor('#181818'))
-        pen.setStyle(Qt.PenStyle.SolidLine)
-        painter.setPen(pen)
-        painter.drawRoundedRect(QtCore.QRectF(48, 18, 85, 70), 6, 6)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(color)
-        mountain = QtGui.QPainterPath()
-        mountain.moveTo(56, 79)
-        mountain.lineTo(80, 52)
-        mountain.lineTo(96, 67)
-        mountain.lineTo(112, 45)
-        mountain.lineTo(127, 79)
-        mountain.closeSubpath()
-        painter.drawPath(mountain)
-        painter.drawEllipse(QtCore.QPointF(69, 37), 8, 8)
-
-
 class WelcomeOverlay(MainControlsMixin, QtWidgets.QWidget):
     """Quiet empty-canvas prompt with only the two useful next actions."""
 
@@ -132,26 +99,31 @@ class WelcomeOverlay(MainControlsMixin, QtWidgets.QWidget):
 
         self.files_view = RecentFilesView(self, parent)
         self.files_view.hide()
-        self.artwork = DropArtwork(self)
+        self.wordmark = QtWidgets.QLabel('OpenRef', self)
+        self.wordmark.setObjectName('welcomeWordmark')
+        self.wordmark.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.label = QtWidgets.QLabel(
-            'Drag and drop images here\nor', self)
+            'A quiet canvas for visual thinking', self)
         self.label.setObjectName('welcomeMessage')
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.browse_button = QtWidgets.QPushButton('Browse', self)
-        self.browse_button.setObjectName('welcomeBrowse')
-        self.browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.browse_button.clicked.connect(parent.on_action_insert_images)
-        self.help_button = QtWidgets.QPushButton('Help', self)
+        modifier = '⌘' if sys.platform == 'darwin' else 'Ctrl+'
+        self.shortcuts = QtWidgets.QLabel(
+            f'{modifier}O  Open   ·   {modifier}V  Paste   ·   D  Draw', self)
+        self.shortcuts.setObjectName('welcomeShortcuts')
+        self.shortcuts.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.help_button = QtWidgets.QPushButton('View all shortcuts', self)
         self.help_button.setObjectName('welcomeHelp')
         self.help_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.help_button.clicked.connect(parent.on_action_help)
 
         center = QtWidgets.QVBoxLayout()
-        center.setSpacing(10)
-        center.addWidget(self.artwork, alignment=Qt.AlignmentFlag.AlignCenter)
-        center.addWidget(self.label, alignment=Qt.AlignmentFlag.AlignCenter)
+        center.setSpacing(8)
         center.addWidget(
-            self.browse_button, alignment=Qt.AlignmentFlag.AlignCenter)
+            self.wordmark, alignment=Qt.AlignmentFlag.AlignCenter)
+        center.addWidget(self.label, alignment=Qt.AlignmentFlag.AlignCenter)
+        center.addSpacing(12)
+        center.addWidget(
+            self.shortcuts, alignment=Qt.AlignmentFlag.AlignCenter)
         center.addWidget(
             self.help_button, alignment=Qt.AlignmentFlag.AlignCenter)
         self.layout = QtWidgets.QVBoxLayout(self)

@@ -920,7 +920,7 @@ def test_on_action_always_on_top_checked(
         show_mock, destroy_mock, create_mock, view):
     view.on_action_always_on_top(True)
     assert view.parent.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
-    assert show_mock.call_count == 2  # Window plus feedback toast
+    assert show_mock.call_count >= 2  # Window, feedback, optional chrome
     destroy_mock.assert_called_once()
     create_mock.assert_called_once()
     assert view._hud_toast.label.text() == 'Always on top enabled'
@@ -933,7 +933,7 @@ def test_on_action_always_on_top_unchecked(
         show_mock, destroy_mock, create_mock, view):
     view.on_action_always_on_top(False)
     assert not (view.parent.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
-    assert show_mock.call_count == 2  # Window plus feedback toast
+    assert show_mock.call_count >= 2  # Window, feedback, optional chrome
     destroy_mock.assert_called_once()
     create_mock.assert_called_once()
 
@@ -953,7 +953,7 @@ def test_on_action_show_titlebar_checked(
         show_mock, destroy_mock, create_mock, view):
     view.on_action_show_titlebar(True)
     assert not (view.parent.windowFlags() & Qt.WindowType.FramelessWindowHint)
-    assert show_mock.call_count == 2  # Window plus feedback toast
+    assert show_mock.call_count >= 2  # Window, feedback, optional chrome
     destroy_mock.assert_called_once()
     create_mock.assert_called_once()
 
@@ -965,7 +965,7 @@ def test_on_action_show_titlebar_unchecked(
         show_mock, destroy_mock, create_mock, view):
     view.on_action_show_titlebar(False)
     assert view.parent.windowFlags() & Qt.WindowType.FramelessWindowHint
-    assert show_mock.call_count == 2  # Window plus feedback toast
+    assert show_mock.call_count >= 2  # Window, feedback, optional chrome
     destroy_mock.assert_called_once()
     create_mock.assert_called_once()
 
@@ -1501,6 +1501,34 @@ def test_right_drag_moves_unlocked_window(move_mock, view):
     assert view.right_window_drag_active is False
 
 
+def test_right_click_opens_context_menu_only_on_release(view):
+    view.on_context_menu = MagicMock()
+    press = MagicMock()
+    press.button.return_value = Qt.MouseButton.RightButton
+    press.globalPosition.return_value = QtCore.QPointF(100, 100)
+    view.mousePressEvent(press)
+    view.on_context_menu.assert_not_called()
+
+    release = MagicMock()
+    release.position.return_value = QtCore.QPointF(22, 24)
+    view.mouseReleaseEvent(release)
+    view.on_context_menu.assert_called_once_with(QtCore.QPoint(22, 24))
+
+
+def test_meaningful_right_drag_suppresses_context_menu(view):
+    view.on_context_menu = MagicMock()
+    press = MagicMock()
+    press.button.return_value = Qt.MouseButton.RightButton
+    press.globalPosition.return_value = QtCore.QPointF(100, 100)
+    view.mousePressEvent(press)
+    move = MagicMock()
+    move.globalPosition.return_value = QtCore.QPointF(120, 120)
+    view.mouseMoveEvent(move)
+    release = MagicMock()
+    view.mouseReleaseEvent(release)
+    view.on_context_menu.assert_not_called()
+
+
 @patch('beeref.view.sys.platform', 'darwin')
 @patch('beeref.view.BeeGraphicsView.pan')
 def test_right_drag_pans_canvas_in_fullscreen_on_macos(pan_mock, view):
@@ -1546,6 +1574,29 @@ def test_lock_window_action_controls_right_drag(view):
     assert view.window_position_locked is True
     view.on_action_lock_window(False)
     assert view.window_position_locked is False
+
+
+def test_fullscreen_anchor_restoration_keeps_scene_point_on_screen(view):
+    scene_point = QtCore.QPointF(123, 234)
+    global_point = view.viewport().mapToGlobal(QtCore.QPoint(50, 60))
+    view._restore_global_canvas_anchor(scene_point, global_point)
+
+    restored = view.viewport().mapToGlobal(
+        view.mapFromScene(scene_point))
+    assert (restored - global_point).manhattanLength() <= 2
+
+
+@patch('beeref.view.BeeGraphicsView.zoom')
+def test_native_pinch_zooms_at_gesture_position(zoom_mock, view):
+    event = MagicMock()
+    event.type.return_value = QtCore.QEvent.Type.NativeGesture
+    event.gestureType.return_value = Qt.NativeGestureType.ZoomNativeGesture
+    event.value.return_value = 0.08
+    event.position.return_value = QtCore.QPointF(70, 90)
+
+    assert view.viewportEvent(event) is True
+    zoom_mock.assert_called_once_with(72.0, QtCore.QPointF(70, 90))
+    event.accept.assert_called_once_with()
 
 
 @patch('PyQt6.QtWidgets.QGraphicsView.mouseMoveEvent')

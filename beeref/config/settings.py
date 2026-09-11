@@ -176,6 +176,15 @@ class BeeSettings(QtCore.QSettings):
     def on_startup(self):
         """Settings to be applied on application startup."""
 
+        # Existing BeeRef/OpenRef profiles may have persisted the old native
+        # frame and menu defaults. Migrate them once to OpenRef's contextual
+        # canvas chrome while leaving the options available in View.
+        migration = 'OpenRef/migrations/contextual_chrome_v1'
+        if not self.value(migration, False, type=bool):
+            self.setValue('View/show_titlebar', False)
+            self.setValue('View/show_menubar', False)
+            self.setValue(migration, True)
+
         if os.environ.get('QT_IMAGEIO_MAXALLOC'):
             alloc = int(os.environ['QT_IMAGEIO_MAXALLOC'])
         else:

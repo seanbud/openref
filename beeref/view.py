@@ -95,6 +95,12 @@ class BeeGraphicsView(MainControlsMixin,
         self._eraser_candidates = {}
         self._eraser_active = False
         self._right_canvas_panning = False
+        self._right_canvas_pending = False
+        self._fullscreen_anchor = None
+        self._fullscreen_anchor_timer = QtCore.QTimer(self)
+        self._fullscreen_anchor_timer.setSingleShot(True)
+        self._fullscreen_anchor_timer.timeout.connect(
+            self._clear_fullscreen_anchor)
         self.window_position_locked = False
         self._recalculating_scene_rect = False
 
@@ -328,13 +334,31 @@ class BeeGraphicsView(MainControlsMixin,
         self.show_feedback('Selection framed', '⌗', 'fit_selection')
 
     def on_action_fullscreen(self, checked):
+        anchor_view = self.viewport().rect().center()
+        anchor_scene = self.mapToScene(anchor_view)
+        anchor_global = self.viewport().mapToGlobal(anchor_view)
+        self._fullscreen_anchor = (anchor_scene, anchor_global)
+        self._fullscreen_anchor_timer.start(450)
         if checked:
             self.parent.showFullScreen()
         else:
             self.parent.showNormal()
+        QtCore.QTimer.singleShot(
+            0, lambda: self._restore_global_canvas_anchor(
+                anchor_scene, anchor_global))
         self.show_feedback(
             'Fullscreen enabled' if checked else 'Fullscreen disabled',
             '⛶', 'fullscreen')
+
+    def _restore_global_canvas_anchor(self, scene_point, global_point):
+        """Keep canvas content pinned to its pre-transition screen point."""
+
+        local_anchor = self.viewport().mapFromGlobal(global_point)
+        self.pan(self.mapFromScene(scene_point) - local_anchor)
+        self.reset_previous_transform()
+
+    def _clear_fullscreen_anchor(self):
+        self._fullscreen_anchor = None
 
     def on_action_always_on_top(self, checked):
         self.parent.setWindowFlag(
@@ -603,7 +627,6 @@ class BeeGraphicsView(MainControlsMixin,
         logger.debug(f'Exiting draw mode, commit={commit}')
         self._clear_eraser_preview()
         self._temporary_eraser_tool = None
-        drawing_changed = False
         if self.draw_item:
             if self.draw_current_stroke:
                 self.draw_item.add_stroke(self.draw_current_stroke)
@@ -615,7 +638,6 @@ class BeeGraphicsView(MainControlsMixin,
                 if not commit:
                     self.draw_item.replace_strokes(before)
                 elif before != after:
-                    drawing_changed = True
                     if not after:
                         # Preserve the original contents inside the delete
                         # command so undo restores a usable drawing item.
@@ -627,7 +649,6 @@ class BeeGraphicsView(MainControlsMixin,
                             self.draw_item, after, before,
                             ignore_first_redo=True))
             elif commit and self.draw_item.strokes:
-                drawing_changed = True
                 self.scene.removeItem(self.draw_item)
                 self.undo_stack.push(
                     commands.InsertItems(
@@ -641,17 +662,17 @@ class BeeGraphicsView(MainControlsMixin,
         self.active_mode = None
         self.draw_toolbar.hide()
         self.viewport().unsetCursor()
-        message = 'Drawing saved' if drawing_changed else 'Draw mode disabled'
-        self.show_feedback(message, '✓', 'draw_mode')
+        # Leaving draw mode is already visually obvious when the toolbar and
+        # cursor disappear; a success toast here only obscures the canvas.
 
-    def set_draw_tool(self, tool):
+    def set_draw_tool(self, tool, announce=True):
         self.draw_tool = tool
         self.draw_toolbar.set_tool(tool)
         cursor = (Qt.CursorShape.CrossCursor
                   if tool != 'eraser'
                   else Qt.CursorShape.PointingHandCursor)
         self.viewport().setCursor(cursor)
-        if self.active_mode == self.DRAW_MODE:
+        if self.active_mode == self.DRAW_MODE and announce:
             labels = {
                 'pen': ('Pen', '✎', 'D'),
                 'line': ('Line', '╱', 'L'),
@@ -1311,6 +1332,10 @@ class BeeGraphicsView(MainControlsMixin,
             = self.keyboard_settings.mousewheel_action_for_event(event)
 
         delta = event.angleDelta().y()
+        if delta == 0:
+            # Precision trackpads commonly provide pixel deltas while wheels
+            # provide angle deltas.
+            delta = event.pixelDelta().y() * 8
         if inverted:
             delta = delta * -1
 
@@ -1326,6 +1351,21 @@ class BeeGraphicsView(MainControlsMixin,
             self.pan(QtCore.QPointF(0.5 * delta, 0))
             event.accept()
             return
+
+    def viewportEvent(self, event):
+        if event.type() == QtCore.QEvent.Type.NativeGesture:
+            gesture = event.gestureType()
+            if gesture == Qt.NativeGestureType.ZoomNativeGesture:
+                # QNativeGestureEvent.value() is a small incremental scale
+                # delta. Reuse the same mouse-anchored zoom path as wheels.
+                self.zoom(float(event.value()) * 900, event.position())
+                event.accept()
+                return True
+            if gesture in (Qt.NativeGestureType.BeginNativeGesture,
+                           Qt.NativeGestureType.EndNativeGesture):
+                event.accept()
+                return True
+        return super().viewportEvent(event)
 
     def tabletEvent(self, event):
         if self.active_mode == self.DRAW_MODE:
@@ -1343,7 +1383,8 @@ class BeeGraphicsView(MainControlsMixin,
                     Qt.Key.Key_D, Qt.Key.Key_L, Qt.Key.Key_R, Qt.Key.Key_C,
                     Qt.Key.Key_E, Qt.Key.Key_T, Qt.Key.Key_1, Qt.Key.Key_2,
                     Qt.Key.Key_3, Qt.Key.Key_BracketLeft,
-                    Qt.Key.Key_BracketRight, Qt.Key.Key_Meta)):
+                    Qt.Key.Key_BracketRight, Qt.Key.Key_Meta,
+                    Qt.Key.Key_Control)):
             event.accept()
             return True
         return super().event(event)
@@ -1352,9 +1393,9 @@ class BeeGraphicsView(MainControlsMixin,
         if (event.button() == Qt.MouseButton.RightButton
                 and self.parent.isFullScreen()
                 and not sys.platform.startswith('win')):
-            self._right_canvas_panning = True
+            self._right_canvas_pending = True
+            self._right_canvas_panning = False
             self.event_start = event.position()
-            self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
             return
 
@@ -1374,6 +1415,12 @@ class BeeGraphicsView(MainControlsMixin,
                 event.accept()
                 return
             if event.button() == Qt.MouseButton.LeftButton:
+                if (sys.platform == 'darwin'
+                        and self.draw_tool == 'pen'
+                        and modifiers
+                        & Qt.KeyboardModifier.ControlModifier):
+                    self._temporary_eraser_tool = 'pen'
+                    self.set_draw_tool('eraser', announce=False)
                 scene_pos = self.mapToScene(event.pos())
                 if self.draw_tool == 'eraser':
                     self._begin_eraser(scene_pos, event.position())
@@ -1428,6 +1475,20 @@ class BeeGraphicsView(MainControlsMixin,
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._right_canvas_pending:
+            pos = event.position()
+            if ((pos - self.event_start).manhattanLength() >= 6
+                    or self._right_canvas_panning):
+                if not self._right_canvas_panning:
+                    self._right_canvas_panning = True
+                    self.viewport().setCursor(
+                        Qt.CursorShape.ClosedHandCursor)
+                self.reset_previous_transform()
+                self.pan(self.event_start - pos)
+                self.event_start = pos
+            event.accept()
+            return
+
         if self._right_canvas_panning:
             self.reset_previous_transform()
             pos = event.position()
@@ -1519,11 +1580,15 @@ class BeeGraphicsView(MainControlsMixin,
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if self._right_canvas_panning:
+        if self._right_canvas_pending:
+            was_panning = self._right_canvas_panning
+            self._right_canvas_pending = False
             self._right_canvas_panning = False
             self.viewport().unsetCursor()
             if self.active_mode == self.DRAW_MODE:
-                self.set_draw_tool(self.draw_tool)
+                self.set_draw_tool(self.draw_tool, announce=False)
+            if not was_panning:
+                self.on_context_menu(event.position().toPoint())
             event.accept()
             return
         if self.active_mode == self.DRAW_MODE and self._draw_panning:
@@ -1543,6 +1608,12 @@ class BeeGraphicsView(MainControlsMixin,
             self.draw_item.temp_stroke = None
             self.draw_current_stroke = None
             self._tablet_pressure = 1.0
+            if not self._draw_editing_existing:
+                completed_item = self.draw_item
+                self.scene.removeItem(completed_item)
+                self.undo_stack.push(commands.InsertItems(
+                    self.scene, [completed_item]))
+                self.draw_item = None
             event.accept()
             return
 
@@ -1563,6 +1634,8 @@ class BeeGraphicsView(MainControlsMixin,
     def resizeEvent(self, event):
         super().resizeEvent(event)
         self.recalc_scene_rect()
+        if self._fullscreen_anchor is not None:
+            self._restore_global_canvas_anchor(*self._fullscreen_anchor)
         self.welcome_overlay.resize(self.size())
         if hasattr(self, 'draw_toolbar'):
             self._position_draw_toolbar()
@@ -1579,11 +1652,11 @@ class BeeGraphicsView(MainControlsMixin,
         if self.active_mode == self.DRAW_MODE:
             modifiers = event.modifiers()
             if (sys.platform == 'darwin'
-                    and event.key() == Qt.Key.Key_Meta
+                    and event.key() in (Qt.Key.Key_Control, Qt.Key.Key_Meta)
                     and not event.isAutoRepeat()
                     and self.draw_tool == 'pen'):
                 self._temporary_eraser_tool = self.draw_tool
-                self.set_draw_tool('eraser')
+                self.set_draw_tool('eraser', announce=False)
                 event.accept()
                 return
             if (event.key() == Qt.Key.Key_D
@@ -1637,11 +1710,11 @@ class BeeGraphicsView(MainControlsMixin,
     def keyReleaseEvent(self, event):
         if (self.active_mode == self.DRAW_MODE
                 and self._temporary_eraser_tool is not None
-                and event.key() == Qt.Key.Key_Meta
+                and event.key() in (Qt.Key.Key_Control, Qt.Key.Key_Meta)
                 and not event.isAutoRepeat()):
             previous = self._temporary_eraser_tool
             self._temporary_eraser_tool = None
-            self.set_draw_tool(previous)
+            self.set_draw_tool(previous, announce=False)
             event.accept()
             return
         super().keyReleaseEvent(event)

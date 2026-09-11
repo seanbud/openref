@@ -202,7 +202,7 @@ actions = ActionList([
     Action(
         id='delete',
         text='&Delete',
-        shortcuts=['Del'],
+        shortcuts=['Del', 'Backspace'],
         callback='on_action_delete_items',
         group='active_when_selection',
     ),

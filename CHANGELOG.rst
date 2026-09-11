@@ -31,7 +31,8 @@ Changed
 
 * Renamed the application and public fork to OpenRef, with a distinct desktop
   icon and updated application/package metadata.
-* Refreshed the dark theme and reduced the empty board to Browse and Help.
+* Refreshed the dark theme and redesigned the empty board around the OpenRef
+  wordmark and a small set of useful shortcuts.
 * The compact frameless canvas and hover-revealed window controls are now the
   default; a native title bar remains available from the View menu.
 * Reduced canvas UI scale and redrew drawing/chrome icons around OpenRef's own
@@ -41,7 +42,8 @@ Changed
 * Added shortcuts for always-on-top, fullscreen, focusing the canvas or
   selection, and changing item depth.
 * Added GPLv3, exact-source, and attribution material to every installer.
-* Freehand marks now use smooth interpolated curves at every zoom level.
+* Freehand marks now use jitter-filtered, smooth interpolated curves at every
+  zoom level.
 * Mouse-wheel zoom is effectively unbounded and remains centered beneath the
   pointer; fullscreen right-drag pans the canvas.
 * Windowed right-drag moves an unlocked window, with a persistent lock toggle.
@@ -50,6 +52,21 @@ Changed
 * Right-drag moves windowed canvases on macOS and Windows. In fullscreen,
   macOS right-drag pans while Windows restores and moves the window. Middle
   drag consistently pans the canvas on both platforms.
+* Every completed stroke is an independent selectable and erasable object;
+  older multi-stroke drawings remain compatible.
+* Right-click menus open on release and are suppressed after a meaningful
+  window drag. Fullscreen transitions preserve the canvas's screen anchor.
+* Native macOS pinch gestures zoom around the gesture position, and Delete or
+  Backspace removes selected objects.
+
+Fixed
+-----
+
+* The custom color studio now paints an opaque frame and can be moved by
+  dragging its header.
+* macOS Command-to-erase recognizes Qt's platform-specific modifier mapping.
+* Used canvas space is always repainted as one enclosing rectangle, and the
+  eraser preview now has a short, tapered fade.
 
 The drawing foundation was contributed by Cinderflame-Linear in PR #150.
 Performance work draws from PR #154 by Feihei, and command-line parsing from

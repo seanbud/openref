@@ -75,6 +75,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
     def expand_used_space(self):
         """Grow, but never shrink, the canvas area claimed by content."""
 
+        previous = QtCore.QRectF(self.used_space_rect)
         content = self._padded_content_rect(self.itemsBoundingRect())
         if content.isNull() or content.isEmpty():
             return self.used_space_rect
@@ -82,6 +83,14 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             self.used_space_rect = content
         else:
             self.used_space_rect = self.used_space_rect.united(content)
+        # Used space is one persistent bounding rectangle. Invalidate the full
+        # union when it grows so QGraphicsView cannot retain stale background
+        # tiles that make it appear as several overlapping rectangles.
+        if self.used_space_rect != previous:
+            dirty = (self.used_space_rect if previous.isEmpty()
+                     else previous.united(self.used_space_rect))
+            layer = QtWidgets.QGraphicsScene.SceneLayer.BackgroundLayer
+            self.invalidate(dirty, layer)
         return QtCore.QRectF(self.used_space_rect)
 
     def optimize_used_space(self):

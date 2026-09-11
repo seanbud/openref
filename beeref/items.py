@@ -839,10 +839,16 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
             elif len(points) == 2:
                 path.lineTo(end)
             else:
-                # Catmull-Rom-to-Bezier interpolation keeps the curve passing
-                # through every sampled point without exposing mouse-event
-                # corners. Endpoints are duplicated to avoid edge kinks.
-                vectors = [self._point(point) for point in points]
+                # Suppress high-frequency pointer jitter before interpolating.
+                # Endpoints remain exact while the weighted interior samples
+                # produce a calmer, ink-like curve at every zoom level.
+                raw = [self._point(point) for point in points]
+                vectors = [raw[0]]
+                for index in range(1, len(raw) - 1):
+                    vectors.append(
+                        (raw[index - 1] + raw[index] * 2
+                         + raw[index + 1]) / 4)
+                vectors.append(raw[-1])
                 for index in range(len(vectors) - 1):
                     before = vectors[max(0, index - 1)]
                     current = vectors[index]

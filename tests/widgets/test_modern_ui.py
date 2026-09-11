@@ -1,4 +1,4 @@
-from PyQt6 import QtGui
+from PyQt6 import QtCore, QtGui
 
 from beeref.widgets.modern_ui import (
     ColorPickerDialog,
@@ -16,6 +16,10 @@ def test_color_picker_is_compact_custom_dialog_with_alpha(qtbot, view):
     assert abs(dialog.currentColor().alphaF() - 0.5) < 0.01
     assert dialog.objectName() == 'colorDialog'
     assert dialog.field.minimumWidth() <= dialog.width()
+    assert dialog.testAttribute(
+        QtCore.Qt.WidgetAttribute.WA_StyledBackground)
+    assert not dialog.testAttribute(
+        QtCore.Qt.WidgetAttribute.WA_TranslucentBackground)
 
 
 def test_color_picker_updates_toolbar_preview_live(qtbot, view):

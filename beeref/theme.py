@@ -106,17 +106,21 @@ QToolTip {
 #dangerButton:hover { background: #ed426b; }
 #secondaryButton { background: #383838; color: #eeeeef; }
 #secondaryButton:hover { background: #454545; }
-#welcomeBrowse {
-    background: #0996c2; border: none; color: white;
-    border-radius: 5px; padding: 7px 16px; font-size: 12px;
-}
-#welcomeBrowse:hover { background: #10a8d7; }
 #welcomeOverlay { background: #181818; }
 #welcomeHelp {
     background: transparent; border: none; color: #777777;
     text-decoration: underline; padding: 2px;
 }
 #welcomeMessage { color: #6e6e6e; font-size: 14px; }
+#welcomeWordmark {
+    color: #d9dadd; font-size: 28px; font-weight: 600;
+    letter-spacing: 1px;
+}
+#welcomeShortcuts {
+    color: #93969d; background: rgba(255, 255, 255, 8);
+    border: 1px solid rgba(255, 255, 255, 18); border-radius: 8px;
+    padding: 8px 12px; font-size: 11px;
+}
 QPushButton {
     background: #34363d; border: 1px solid #484b54; border-radius: 7px;
     padding: 5px 9px;
