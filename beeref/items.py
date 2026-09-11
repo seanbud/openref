@@ -205,11 +205,15 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             pm = self._grayscale_pixmap
         else:
             pm = self.pixmap()
-        img = pm.toImage()
-
-        color = img.pixelColor(int(ipos.x()), int(ipos.y()))
-        if color.alpha():
-            return color
+        # Copying one pixel avoids converting a multi-megapixel pixmap for
+        # every mouse-move event while the sampler is active.
+        x = int(ipos.x())
+        y = int(ipos.y())
+        if 0 <= x < pm.width() and 0 <= y < pm.height():
+            img = pm.copy(x, y, 1, 1).toImage()
+            color = img.pixelColor(0, 0)
+            if color.alpha():
+                return color
 
     def bounding_rect_unselected(self):
         if self.crop_mode:
@@ -735,7 +739,12 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
 
 @register_item
 class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
-    """Class for freehand drawing/sketch strokes added by the user."""
+    """A vector drawing made from pen strokes and geometric figures.
+
+    ``base_size`` is retained in the serialized format for compatibility
+    with the original drawing pull request. New figures also store ``tool``
+    and ``style`` so old files continue to load as freehand solid strokes.
+    """
 
     TYPE = 'path'
 
@@ -743,10 +752,9 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         super().__init__()
         self.save_id = None
         self.is_image = False
-        self.strokes = strokes or []
+        self.strokes = copy.deepcopy(strokes or [])
         self.temp_stroke = None
         self._cached_rect = QtCore.QRectF(0, 0, 1, 1)
-        self._cache_pixmap = None
         self.init_selectable()
         logger.debug(f'Initialized {self}')
 
@@ -755,12 +763,11 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         data = kwargs.get('data', {})
         item = cls(strokes=data.get('strokes', []))
         item._update_bounding_rect()
-        item._invalidate_cache()
         return item
 
     def __str__(self):
         n = len(self.strokes)
-        return f'Path ({n} stroke{"s" if n != 1 else ""})'
+        return f'Drawing ({n} mark{"s" if n != 1 else ""})'
 
     def get_extra_save_data(self):
         return {'strokes': self.strokes}
@@ -774,130 +781,217 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         if self.flip() == -1:
             item.do_flip()
         item._update_bounding_rect()
-        item._invalidate_cache()
         return item
 
     def contains(self, point):
-        return self.boundingRect().contains(point)
+        return self.shape().contains(point)
 
     def bounding_rect_unselected(self):
         rect = QtCore.QRectF(self._cached_rect)
         if self.temp_stroke:
-            base_size = self.temp_stroke.get('base_size', 10)
-            for pt in self.temp_stroke.get('points', []):
-                r = base_size * pt.get('pressure', 1.0) / 2 + 1
-                rect = rect.united(QtCore.QRectF(
-                    pt['x'] - r, pt['y'] - r, 2 * r, 2 * r))
+            rect = rect.united(self._stroke_bounds(self.temp_stroke))
         return rect
 
     def add_stroke(self, stroke):
         self.prepareGeometryChange()
-        self.strokes.append(stroke)
+        self.strokes.append(copy.deepcopy(stroke))
         self._update_bounding_rect()
-        self._invalidate_cache()
         self.update()
 
-    def _invalidate_cache(self):
-        self._cache_pixmap = None
+    def replace_strokes(self, strokes):
+        """Replace all marks while keeping geometry notifications correct."""
+
+        self.prepareGeometryChange()
+        self.strokes = copy.deepcopy(strokes)
+        self._update_bounding_rect()
+        self.update()
+
+    @staticmethod
+    def _point(data):
+        return QtCore.QPointF(data['x'], data['y'])
+
+    @staticmethod
+    def _effective_width(stroke):
+        return float(stroke.get('base_size', stroke.get('width', 8)))
+
+    def _stroke_path(self, stroke):
+        points = stroke.get('points', [])
+        path = QtGui.QPainterPath()
+        if not points:
+            return path
+
+        start = self._point(points[0])
+        end = self._point(points[-1])
+        tool = stroke.get('tool', 'pen')
+
+        if tool == 'rectangle':
+            path.addRect(QtCore.QRectF(start, end).normalized())
+        elif tool == 'ellipse':
+            path.addEllipse(QtCore.QRectF(start, end).normalized())
+        elif tool == 'line':
+            path.moveTo(start)
+            path.lineTo(end)
+        else:
+            path.moveTo(start)
+            if len(points) == 1:
+                path.lineTo(start + QtCore.QPointF(0.01, 0.01))
+            elif len(points) == 2:
+                path.lineTo(end)
+            else:
+                # Quadratic mid-point smoothing removes the jagged feel of
+                # raw tablet/mouse events while preserving the final point.
+                for index in range(1, len(points) - 1):
+                    current = self._point(points[index])
+                    following = self._point(points[index + 1])
+                    midpoint = (current + following) / 2
+                    path.quadTo(current, midpoint)
+                path.lineTo(end)
+        return path
+
+    def _arrow_path(self, stroke):
+        if (stroke.get('style') != 'arrow'
+                or stroke.get('tool', 'pen') not in ('pen', 'line')):
+            return QtGui.QPainterPath()
+        points = stroke.get('points', [])
+        if len(points) < 2:
+            return QtGui.QPainterPath()
+        end = self._point(points[-1])
+        previous = self._point(points[-2])
+        if stroke.get('tool', 'pen') == 'line':
+            previous = self._point(points[0])
+        angle = math.atan2(end.y() - previous.y(), end.x() - previous.x())
+        length = max(10.0, self._effective_width(stroke) * 3.0)
+        spread = math.radians(28)
+        p1 = end - QtCore.QPointF(
+            math.cos(angle - spread) * length,
+            math.sin(angle - spread) * length)
+        p2 = end - QtCore.QPointF(
+            math.cos(angle + spread) * length,
+            math.sin(angle + spread) * length)
+        path = QtGui.QPainterPath(end)
+        path.lineTo(p1)
+        path.moveTo(end)
+        path.lineTo(p2)
+        return path
+
+    def _stroke_bounds(self, stroke):
+        path = self._stroke_path(stroke)
+        path.addPath(self._arrow_path(stroke))
+        width = self._effective_width(stroke)
+        margin = width / 2 + 3
+        return path.boundingRect().marginsAdded(
+            QtCore.QMarginsF(margin, margin, margin, margin))
 
     def _update_bounding_rect(self):
         if not self.strokes:
             self._cached_rect = QtCore.QRectF(0, 0, 1, 1)
             return
-        min_x = float('inf')
-        min_y = float('inf')
-        max_x = float('-inf')
-        max_y = float('-inf')
-        max_r = 0
+        rect = QtCore.QRectF()
         for stroke in self.strokes:
-            base_size = stroke.get('base_size', 10)
-            for pt in stroke.get('points', []):
-                r = base_size * pt.get('pressure', 1.0) / 2
-                if r > max_r:
-                    max_r = r
-                x = pt['x']
-                y = pt['y']
-                if x < min_x:
-                    min_x = x
-                if x > max_x:
-                    max_x = x
-                if y < min_y:
-                    min_y = y
-                if y > max_y:
-                    max_y = y
-        pad = max_r + 1
-        self._cached_rect = QtCore.QRectF(
-            min_x - pad, min_y - pad,
-            (max_x - min_x) + 2 * pad,
-            (max_y - min_y) + 2 * pad)
+            bounds = self._stroke_bounds(stroke)
+            rect = bounds if rect.isNull() else rect.united(bounds)
+        self._cached_rect = (
+            rect if not rect.isNull() else QtCore.QRectF(0, 0, 1, 1))
 
     def _paint_stroke(self, painter, stroke):
-        color_data = stroke.get('color', [0, 0, 0, 255])
+        color_data = stroke.get('color', [235, 235, 238, 255])
         color = QtGui.QColor(*color_data)
-        base_size = stroke.get('base_size', 10)
+        base_size = self._effective_width(stroke)
         points = stroke.get('points', [])
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QtGui.QBrush(color))
-
-        for i, pt in enumerate(points):
-            pressure = pt.get('pressure', 1.0)
-            radius = base_size * pressure / 2
-            painter.drawEllipse(
-                QtCore.QPointF(pt['x'], pt['y']),
-                radius, radius)
-            if i > 0:
-                prev = points[i - 1]
-                dx = pt['x'] - prev['x']
-                dy = pt['y'] - prev['y']
-                dist = math.hypot(dx, dy)
-                if dist > 1:
-                    steps = int(dist)
-                    for s in range(1, steps):
-                        t = s / dist
-                        ix = prev['x'] + dx * t
-                        iy = prev['y'] + dy * t
-                        prev_p = prev.get('pressure', 1.0)
-                        ip = prev_p + (pressure - prev_p) * t
-                        ir = base_size * ip / 2
-                        painter.drawEllipse(
-                            QtCore.QPointF(ix, iy), ir, ir)
-
-    def _ensure_cache(self):
-        if self._cache_pixmap is not None:
+        if not points:
             return
-        if not self.strokes:
-            return
-        rect = self._cached_rect
-        w = max(1, int(math.ceil(rect.width())))
-        h = max(1, int(math.ceil(rect.height())))
-        pixmap = QtGui.QPixmap(w, h)
-        pixmap.fill(QtGui.QColor(0, 0, 0, 0))
-        painter = QtGui.QPainter(pixmap)
-        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        painter.translate(-rect.x(), -rect.y())
+
+        pen = QtGui.QPen(color, base_size)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        if stroke.get('style') == 'dotted':
+            pen.setStyle(Qt.PenStyle.DotLine)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        tool = stroke.get('tool', 'pen')
+        if tool == 'pen' and any('pressure' in point for point in points):
+            # Pressure is rendered per segment. Mouse strokes simply use 1.0.
+            for previous, current in zip(points, points[1:]):
+                pressure = (previous.get('pressure', 1.0)
+                            + current.get('pressure', 1.0)) / 2
+                pen.setWidthF(max(0.5, base_size * pressure))
+                painter.setPen(pen)
+                painter.drawLine(self._point(previous), self._point(current))
+            if len(points) == 1:
+                painter.drawPoint(self._point(points[0]))
+        else:
+            painter.drawPath(self._stroke_path(stroke))
+
+        arrow = self._arrow_path(stroke)
+        if not arrow.isEmpty():
+            pen.setStyle(Qt.PenStyle.SolidLine)
+            painter.setPen(pen)
+            painter.drawPath(arrow)
+
+    def stroke_indexes_at(self, point, radius):
+        """Return marks intersecting an eraser centered on ``point``."""
+
+        eraser = QtGui.QPainterPath()
+        eraser.addEllipse(point, radius, radius)
+        matches = []
+        for index, stroke in enumerate(self.strokes):
+            path = self._stroke_path(stroke)
+            path.addPath(self._arrow_path(stroke))
+            stroker = QtGui.QPainterPathStroker()
+            stroker.setWidth(self._effective_width(stroke) + radius * 2)
+            if stroker.createStroke(path).intersects(eraser):
+                matches.append(index)
+        return matches
+
+    def erase_at(self, point, radius):
+        indexes = self.stroke_indexes_at(point, radius)
+        if not indexes:
+            return False
+        self.prepareGeometryChange()
+        for index in reversed(indexes):
+            self.strokes.pop(index)
+        self._update_bounding_rect()
+        self.update()
+        return True
+
+    def shape(self):
+        if self.has_selection_handles():
+            return super().shape()
+        result = QtGui.QPainterPath()
         for stroke in self.strokes:
-            self._paint_stroke(painter, stroke)
-        painter.end()
-        self._cache_pixmap = pixmap
+            stroker = QtGui.QPainterPathStroker()
+            stroker.setWidth(max(8, self._effective_width(stroke) + 4))
+            result.addPath(stroker.createStroke(self._stroke_path(stroke)))
+            result.addPath(stroker.createStroke(self._arrow_path(stroke)))
+        return result
 
     def paint(self, painter, option, widget):
-        if self.strokes:
-            self._ensure_cache()
-            if self._cache_pixmap is not None:
-                painter.drawPixmap(
-                    QtCore.QPointF(
-                        self._cached_rect.x(),
-                        self._cached_rect.y()),
-                    self._cache_pixmap)
-
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        for stroke in self.strokes:
+            self._paint_stroke(painter, stroke)
         if self.temp_stroke:
-            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
             self._paint_stroke(painter, self.temp_stroke)
 
         self.paint_selectable(painter, option, widget)
 
+    def render_to_image(self):
+        rect = self.bounding_rect_unselected()
+        image = QtGui.QImage(
+            max(1, math.ceil(rect.width())),
+            max(1, math.ceil(rect.height())),
+            QtGui.QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(QtCore.Qt.GlobalColor.transparent)
+        painter = QtGui.QPainter(image)
+        painter.translate(-rect.topLeft())
+        for stroke in self.strokes:
+            self._paint_stroke(painter, stroke)
+        painter.end()
+        return image, rect
+
     def copy_to_clipboard(self, clipboard):
-        pass
+        image, _ = self.render_to_image()
+        clipboard.setImage(image)
 
 
 @register_item

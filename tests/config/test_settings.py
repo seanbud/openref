@@ -19,9 +19,13 @@ def test_command_line_args_singleton():
 @patch('beeref.config.settings.parser.parse_args')
 def test_command_line_args_with_check_forces_new_parsing(parse_mock):
     args1 = CommandlineArgs()
+    parse_mock.assert_called_with([])
     args2 = CommandlineArgs(with_check=True)
-    parse_mock.assert_called_once()
-    assert args1 is not args2
+    parse_mock.assert_called_with()
+    args3 = CommandlineArgs()
+    assert parse_mock.call_count == 2
+    assert args1 is args2
+    assert args2 is args3
     CommandlineArgs._instance = None
 
 
@@ -86,6 +90,20 @@ def test_settings_remove_with_callback(settings):
 
 def test_settings_value_or_default_gets_default(settings):
     assert settings.valueOrDefault('Items/image_storage_format') == 'best'
+
+
+def test_appearance_defaults_are_openref_specific(settings):
+    assert settings.valueOrDefault('Appearance/theme') == 'midnight'
+    assert settings.valueOrDefault(
+        'Appearance/drawing_toolbar_position') == 'bottom-right'
+
+
+def test_invalid_appearance_values_use_defaults(settings):
+    settings.setValue('Appearance/theme', 'third-party-clone')
+    settings.setValue('Appearance/drawing_toolbar_position', 'middle')
+    assert settings.valueOrDefault('Appearance/theme') == 'midnight'
+    assert settings.valueOrDefault(
+        'Appearance/drawing_toolbar_position') == 'bottom-right'
 
 
 def test_settings_value_or_default_gets_overriden_value(settings):

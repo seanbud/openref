@@ -209,14 +209,14 @@ actions = ActionList([
     Action(
         id='raise_to_top',
         text='&Raise to Top',
-        shortcuts=['PgUp'],
+        shortcuts=['Up', 'PgUp'],
         callback='on_action_raise_to_top',
         group='active_when_selection',
     ),
     Action(
         id='lower_to_bottom',
         text='Lower to Bottom',
-        shortcuts=['PgDown'],
+        shortcuts=['Down', 'PgDown'],
         callback='on_action_lower_to_bottom',
         group='active_when_selection',
     ),
@@ -323,13 +323,13 @@ actions = ActionList([
     Action(
         id='fit_scene',
         text='&Fit Scene',
-        shortcuts=['1'],
+        shortcuts=['Ctrl+Space', '1'],
         callback='on_action_fit_scene',
     ),
     Action(
         id='fit_selection',
         text='Fit &Selection',
-        shortcuts=['2'],
+        shortcuts=['Space', '2'],
         callback='on_action_fit_selection',
         group='active_when_selection',
     ),
@@ -373,7 +373,7 @@ actions = ActionList([
     Action(
         id='deselect_all',
         text='Deselect &All',
-        shortcuts=['Ctrl+Shift+A'],
+        shortcuts=['Ctrl+Alt+A'],
         callback='on_action_deselect_all',
     ),
     Action(
@@ -411,6 +411,7 @@ actions = ActionList([
         text='Show &Title Bar',
         checkable=True,
         checked=True,
+        settings='View/show_titlebar',
         callback='on_action_show_titlebar',
     ),
     Action(
@@ -422,13 +423,14 @@ actions = ActionList([
     Action(
         id='fullscreen',
         text='&Fullscreen',
-        shortcuts=['F11'],
+        shortcuts=['Ctrl+F', 'F11'],
         checkable=True,
         callback='on_action_fullscreen',
     ),
     Action(
         id='always_on_top',
         text='&Always On Top',
+        shortcuts=['Ctrl+Shift+A'],
         checkable=True,
         callback='on_action_always_on_top',
     ),
@@ -450,7 +452,7 @@ actions = ActionList([
     Action(
         id='draw_mode',
         text='&Draw',
-        shortcuts=['D'],
+        shortcuts=['Ctrl+D'],
         callback='on_action_draw_mode',
     ),
     Action(
@@ -462,5 +464,11 @@ actions = ActionList([
         id='set_brush_size',
         text='Brush &Size...',
         callback='on_action_set_brush_size',
+    ),
+    Action(
+        id='command_palette',
+        text='Command &Palette...',
+        shortcuts=['Ctrl+Shift+P'],
+        callback='on_action_command_palette',
     ),
 ])

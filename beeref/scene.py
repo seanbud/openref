@@ -397,6 +397,10 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self.cancel_active_modes()
         item = self.itemAt(event.scenePos(), self.views()[0].transform())
         if item:
+            if getattr(item, 'TYPE', None) == 'path':
+                self.views()[0].enter_draw_mode(item)
+                event.accept()
+                return
             if not item.isSelected():
                 item.setSelected(True)
             if item.is_editable:

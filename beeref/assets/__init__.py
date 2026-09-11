@@ -37,7 +37,7 @@ class BeeAssets:
     def on_new(self):
         logger.debug(f'Assets path: {self.PATH}')
 
-        self.logo = QtGui.QIcon(str(self.PATH.joinpath('logo.png')))
+        self.logo = QtGui.QIcon(str(self.PATH.joinpath('openref.png')))
         assert self.logo.isNull() is False
         self.cursor_rotate = self.cursor_from_image(
             'cursor_rotate.png', (20, 20))

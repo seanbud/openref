@@ -30,14 +30,14 @@ def test_recent_files_model_data_fontrole(view):
     assert font.underline() is True
 
 
-@patch('beeref.widgets.welcome_overlay.BeeSettings.get_recent_files',
-       return_value=[])
-def test_welcome_overlay_when_no_recent_files(qapp):
+def test_welcome_overlay_is_canvas_first(qapp):
     parent = QtWidgets.QMainWindow()
     view = BeeGraphicsView(qapp, parent)
     overlay = WelcomeOverlay(view)
     overlay.show()
-    assert overlay.layout.indexOf(overlay.files_widget) < 0
+    assert overlay.objectName() == 'welcomeOverlay'
+    assert overlay.files_view.isHidden()
+    assert overlay.browse_button.text() == 'Browse'
 
 
 def test_recent_files_view_size_hint(qapp):
@@ -48,6 +48,12 @@ def test_recent_files_view_size_hint(qapp):
     files_view.sizeHintForColumn = lambda i: 50 + i
     files_view.update_files(['foo.png', 'bar.png'])
     assert files_view.sizeHint() == QtCore.QSize(53, 25)
+
+
+def test_recent_files_view_empty_size_hint(qapp):
+    parent = QtWidgets.QMainWindow()
+    files_view = RecentFilesView(parent, None)
+    assert files_view.sizeHint() == QtCore.QSize()
 
 
 def test_recent_files_view_on_click(qapp):
@@ -62,14 +68,13 @@ def test_recent_files_view_on_click(qapp):
     view.open_from_file.assert_called_once_with('bar.bee')
 
 
-@patch('beeref.widgets.welcome_overlay.BeeSettings.get_recent_files',
-       return_value=['foo.bee', 'bar.bee'])
-def test_welcome_overlay_when_recent_files(qapp):
+def test_welcome_overlay_browse_opens_insert_dialog(qapp):
     parent = QtWidgets.QMainWindow()
     view = BeeGraphicsView(qapp, parent)
+    view.on_action_insert_images = MagicMock()
     overlay = WelcomeOverlay(view)
-    overlay.show()
-    assert overlay.layout.indexOf(overlay.files_widget) == 0
+    overlay.browse_button.click()
+    view.on_action_insert_images.assert_called_once()
 
 
 @patch('PyQt6.QtWidgets.QGraphicsView.mousePressEvent')

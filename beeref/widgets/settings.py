@@ -180,10 +180,36 @@ class AllocationLimitWidget(IntegerGroup):
 class ConfirmCloseUnsavedWidget(SingleCheckboxGroup):
     TITLE = 'Confirm when closing an unsaved file:'
     HELPTEXT = (
-        'When about to close an unsaved file, should BeeRef ask for '
+        'When about to close an unsaved file, should OpenRef ask for '
         'confirmation?')
     LABEL = 'Confirm when closing'
     KEY = 'Save/confirm_close_unsaved'
+
+
+class ThemeWidget(RadioGroup):
+    TITLE = 'Interface Theme:'
+    HELPTEXT = 'Choose an original OpenRef visual system.'
+    KEY = 'Appearance/theme'
+    OPTIONS = (
+        ('midnight', 'OpenRef Midnight',
+         'Deep blue-charcoal surfaces with a restrained cyan accent.'),
+        ('graphite', 'Graphite',
+         'Neutral low-chroma surfaces for color-critical work.'),
+        ('light', 'Soft Light',
+         'A bright interface with a dark canvas and drawing dock.'),
+    )
+
+
+class DrawingToolbarPositionWidget(RadioGroup):
+    TITLE = 'Drawing Toolbar Position:'
+    HELPTEXT = 'Choose where drawing controls sit inside the canvas.'
+    KEY = 'Appearance/drawing_toolbar_position'
+    OPTIONS = (
+        ('bottom-right', 'Bottom right', 'OpenRef default.'),
+        ('bottom-left', 'Bottom left', 'Place controls near the lower left.'),
+        ('top-right', 'Top right', 'Place controls near the upper right.'),
+        ('top-left', 'Top left', 'Place controls near the upper left.'),
+    )
 
 
 class SettingsDialog(QtWidgets.QDialog):
@@ -208,6 +234,14 @@ class SettingsDialog(QtWidgets.QDialog):
         items_layout.addWidget(ArrangeGapWidget(), 1, 0)
         items_layout.addWidget(ArrangeDefaultWidget(), 1, 1)
         tabs.addTab(items, '&Images && Items')
+
+        # Appearance
+        appearance = QtWidgets.QWidget()
+        appearance_layout = QtWidgets.QGridLayout()
+        appearance.setLayout(appearance_layout)
+        appearance_layout.addWidget(ThemeWidget(), 0, 0)
+        appearance_layout.addWidget(DrawingToolbarPositionWidget(), 0, 1)
+        tabs.addTab(appearance, '&Appearance')
 
         layout = QtWidgets.QVBoxLayout()
         self.setLayout(layout)

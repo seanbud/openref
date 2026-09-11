@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=OpenRef
+GenericName=Reference Canvas
+Comment=A free, modern reference canvas
+Terminal=false
+Exec=/home/yourname/path/to/OpenRef.appimage
+Type=Application
+Icon=/home/yourname/path/to/openref.png
+
+MimeType=application/x-openref;
+Categories=Qt;KDE;Graphics;
+X-KDE-NativeMimeType=application/x-openref
+X-KDE-ExtraNativeMimeTypes=

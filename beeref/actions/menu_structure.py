@@ -134,6 +134,8 @@ menu_structure = [
     {
         'menu': '&Help',
         'items': [
+            'command_palette',
+            MENU_SEPARATOR,
             'help',
             'about',
             'debuglog',

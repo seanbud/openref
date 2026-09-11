@@ -1,7 +1,8 @@
-BeeRef — Notes For Developers
-=============================
+OpenRef — Notes For Developers
+==============================
 
-BeeRef is written in Python and PyQt6.
+OpenRef is written in Python and PyQt6. It remains compatible with BeeRef's
+``.bee`` scene format and keeps the internal ``beeref`` Python package name.
 
 
 Developing
@@ -10,17 +11,17 @@ Developing
 Optional step: Use pyenv to create a virtual environment::
 
   pyenv install -v 3.11
-  pyenv virtualenv 3.11 beeref
+  pyenv virtualenv 3.11 openref
 
 Once the vitrual environment is set up, you can enter it with::
 
-  pyenv activate beeref
+  pyenv activate openref
 
 
-Clone the repository and install beeref and its dependencies::
+Clone the repository and install OpenRef and its dependencies::
 
-  git clone https://github.com/rbreu/beeref.git
-  cd beeref
+  git clone https://github.com/seanbud/openref.git
+  cd openref
   pip install -e .
 
 Install additional development requirements::
@@ -41,7 +42,7 @@ Beeref files are sqlite databases, so they can be inspected with any sqlite brow
 
 For debugging options, run::
 
-  beeref --help
+  openref --help
 
 
 Building the app
@@ -49,19 +50,13 @@ Building the app
 
 To build the app, run::
 
-  pyinstaller BeeRef.spec
+  pyinstaller OpenRef.spec
 
 You will find the generated executable in the folder ``dist``.
 
 
-Website etc.
-------------
+Release installers
+------------------
 
-The Python version badge in the README is generated with pybadges::
-
-  python -m pybadges --left-text=Python --right-text="3.9 | 3.10 | 3.11" > images/python_version_badge.svg
-
-The `website <https://rbreu.github.io/beeref/>`_ is hosted via Github pages from the gh-pages branch. You can run it locally if you have Ruby and bundler installed::
-
-  bundle install
-  bundle exec jekyll serve --baseurl ""
+Release installers are built by ``.github/workflows/release-installers.yml``.
+See ``RELEASING.rst`` for the release and signing workflow.

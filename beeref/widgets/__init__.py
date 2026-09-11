@@ -15,6 +15,8 @@
 
 from importlib.resources import files as rsc_files
 import logging
+from pathlib import Path
+import sys
 
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtCore import Qt
@@ -26,6 +28,8 @@ from beeref.widgets import (  # noqa: F401
     settings,
     welcome_overlay,
     color_gamut,
+    drawing_toolbar,
+    modern_ui,
 )
 
 
@@ -91,6 +95,85 @@ class HelpDialog(QtWidgets.QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
+        self.show()
+
+
+def _bundled_legal_text(filename, fallback):
+    """Read a legal file from source or a frozen application bundle."""
+
+    roots = []
+    if getattr(sys, 'frozen', False):
+        frozen_root = getattr(sys, '_MEIPASS', Path(sys.executable).parent)
+        roots.append(Path(frozen_root))
+    roots.append(Path(__file__).resolve().parents[2])
+    for root in roots:
+        path = root / filename
+        if path.is_file():
+            return path.read_text(encoding='utf-8')
+    return fallback
+
+
+class AboutDialog(QtWidgets.QDialog):
+    """Display project identity, GPL terms, attribution, and source access."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setWindowTitle(f'About {constants.APPNAME}')
+        self.resize(540, 430)
+
+        tabs = QtWidgets.QTabWidget(self)
+        about = QtWidgets.QLabel(
+            f'<h2>{constants.APPNAME} {constants.VERSION}</h2>'
+            f'<p>{constants.APPNAME_FULL}</p>'
+            '<p>A free and open-source reference canvas based on BeeRef.</p>'
+            f'<p>{constants.COPYRIGHT}</p>'
+            '<p>Independent software; not affiliated with or endorsed by '
+            'other reference-board products.</p>'
+            '<p>Official binaries use Qt through PyQt6 and are distributed '
+            'under GNU GPL version 3 only. You may use, study, modify, and '
+            'redistribute them under that license. This software comes with '
+            '<b>no warranty</b>.</p>'
+            f'<p><a href="{constants.WEBSITE}">Project website and source'
+            '</a></p>')
+        about.setWordWrap(True)
+        about.setOpenExternalLinks(True)
+        about.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextBrowserInteraction)
+        tabs.addTab(about, 'About')
+
+        license_text = _bundled_legal_text(
+            'LICENSE',
+            'GNU General Public License version 3 or later.\n\n'
+            f'See {constants.WEBSITE}/blob/main/LICENSE for the full text.')
+        license_view = QtWidgets.QPlainTextEdit(license_text, self)
+        license_view.setReadOnly(True)
+        tabs.addTab(license_view, 'License')
+
+        notices = _bundled_legal_text(
+            'NOTICE',
+            'OpenRef is based on BeeRef by Rebecca Breu and contributors.')
+        source = _bundled_legal_text(
+            'SOURCE_CODE.txt',
+            f'Complete corresponding source: {constants.WEBSITE}')
+        source_view = QtWidgets.QPlainTextEdit(
+            f'{source.rstrip()}\n\n{notices.rstrip()}\n', self)
+        source_view.setReadOnly(True)
+        tabs.addTab(source_view, 'Source & credits')
+
+        third_party = _bundled_legal_text(
+            'THIRD_PARTY_NOTICES.md',
+            'Third-party notices are available with official builds and at '
+            f'{constants.WEBSITE}/blob/main/THIRD_PARTY_NOTICES.md')
+        third_party_view = QtWidgets.QPlainTextEdit(third_party, self)
+        third_party_view.setReadOnly(True)
+        tabs.addTab(third_party_view, 'Third-party licenses')
+
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Close, parent=self)
+        buttons.rejected.connect(self.reject)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(tabs)
+        layout.addWidget(buttons)
         self.show()
 
 
@@ -245,28 +328,85 @@ class ChangeOpacityDialog(QtWidgets.QDialog):
         return super().reject()
 
 
-class BeeNotification(QtWidgets.QWidget):
-    def __init__(self, parent, text):
+class BeeNotification(QtWidgets.QFrame):
+    """A reusable, non-blocking action confirmation HUD.
+
+    Messages hold long enough to read and then ease away. Calling ``present``
+    while a toast is visible replaces it in place, which keeps repeated
+    shortcuts (brush sizing, toggles, undo) feeling immediate instead of
+    producing a stack of notifications.
+    """
+
+    HOLD_MS = 1450
+    FADE_MS = 320
+    BOTTOM_MARGIN = 38
+
+    def __init__(self, parent, text, icon='✓', shortcut=None,
+                 duration=None):
         super().__init__(parent)
-        self.label = QtWidgets.QLabel(text)
+        self.host = parent
         self.setObjectName('BeeNotification')
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-        self.setAutoFillBackground(True)
-        layout = QtWidgets.QVBoxLayout()
-        layout.addWidget(self.label)
-        self.setLayout(layout)
-        color = constants.COLORS['Active:Window']
-        self.setStyleSheet(
-            f'background-color: rgba({color[0]}, {color[1]}, {color[2]}, 0.9);'
-            'padding: 0.7em;'
-            'border-radius: 5px;')
-        self.show()
-        # We only get own width after showing it;
-        # updateGeometry doesn't work on hidden widgets
-        x = (parent.width() - self.width()) / 2
-        self.move(int(x), 10)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
-        QtCore.QTimer.singleShot(1000 * 3, self.deleteLater)
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(11, 8, 10, 8)
+        layout.setSpacing(7)
+
+        self.icon = QtWidgets.QLabel(self)
+        self.icon.setObjectName('notificationIcon')
+        self.icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon.setFixedSize(18, 18)
+        layout.addWidget(self.icon)
+
+        self.label = QtWidgets.QLabel(self)
+        self.label.setObjectName('notificationText')
+        layout.addWidget(self.label)
+
+        self.shortcut = QtWidgets.QLabel(self)
+        self.shortcut.setObjectName('notificationShortcut')
+        layout.addWidget(self.shortcut)
+
+        self.opacity_effect = QtWidgets.QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self.opacity_effect)
+        self.fade = QtCore.QPropertyAnimation(
+            self.opacity_effect, b'opacity', self)
+        self.fade.setDuration(self.FADE_MS)
+        self.fade.setEasingCurve(QtCore.QEasingCurve.Type.OutCubic)
+        self.fade.finished.connect(self.hide)
+
+        self.hold_timer = QtCore.QTimer(self)
+        self.hold_timer.setSingleShot(True)
+        self.hold_timer.timeout.connect(self.start_fade)
+        self.present(text, icon=icon, shortcut=shortcut, duration=duration)
+
+    def present(self, text, icon='✓', shortcut=None, duration=None):
+        """Show or replace the current message and restart its lifetime."""
+
+        self.hold_timer.stop()
+        self.fade.stop()
+        self.opacity_effect.setOpacity(1.0)
+        self.icon.setText(icon or '✓')
+        self.label.setText(text)
+        self.shortcut.setText(shortcut or '')
+        self.shortcut.setVisible(bool(shortcut))
+        self.adjustSize()
+        self.reposition()
+        self.show()
+        self.raise_()
+        self.hold_timer.start(duration or self.HOLD_MS)
+
+    def reposition(self):
+        self.adjustSize()
+        x = max(12, (self.host.width() - self.width()) // 2)
+        y = max(12, self.host.height() - self.height() - self.BOTTOM_MARGIN)
+        self.move(x, y)
+
+    def start_fade(self):
+        self.fade.stop()
+        self.fade.setStartValue(self.opacity_effect.opacity())
+        self.fade.setEndValue(0.0)
+        self.fade.start()
 
 
 class SampleColorWidget(QtWidgets.QWidget):

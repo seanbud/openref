@@ -13,11 +13,12 @@
 # You should have received a copy of the GNU General Public License
 # along with BeeRef.  If not, see <https://www.gnu.org/licenses/>.
 
-APPNAME = 'BeeRef'
-APPNAME_FULL = f'{APPNAME} Reference Image Viewer'
-VERSION = '0.3.4-dev'
-WEBSITE = 'https://github.com/rbreu/beeref'
-COPYRIGHT = 'Copyright © 2021-2024 Rebecca Breu'
+APPNAME = 'OpenRef'
+APPNAME_FULL = f'{APPNAME} Reference Canvas'
+VERSION = '0.4.0-dev'
+WEBSITE = 'https://github.com/seanbud/openref'
+COPYRIGHT = ('OpenRef © 2026 Sean Budning · '
+             'BeeRef © 2021-2024 Rebecca Breu')
 
 CHANGED_SYMBOL = '✎'
 
@@ -25,14 +26,14 @@ COLORS = {
     # Qt:
     'Active:Base': (60, 60, 60),
     'Active:AlternateBase': (70, 70, 70),
-    'Active:Window': (40, 40, 40),
-    'Active:Button': (40, 40, 40),
-    'Active:Text': (200, 200, 200),
+    'Active:Window': (31, 31, 31),
+    'Active:Button': (53, 53, 53),
+    'Active:Text': (232, 233, 237),
     'Active:HighlightedText': (255, 255, 255),
     'Active:WindowText': (200, 200, 200),
     'Active:ButtonText': (200, 200, 200),
-    'Active:Highlight': (83, 167, 165),
-    'Active:Link': (90, 181, 179),
+    'Active:Highlight': (8, 150, 194),
+    'Active:Link': (22, 169, 216),
 
     'Disabled:Base': (40, 40, 40),
     'Disabled:Window': (40, 40, 40, 50),
@@ -40,8 +41,8 @@ COLORS = {
     'Disabled:Light': (0, 0, 0, 0),
     'Disabled:Text': (140, 140, 140),
 
-    # BeeRef specific:
-    'Scene:Selection': (116, 234, 231),
-    'Scene:Canvas': (60, 60, 60),
-    'Scene:Text': (200, 200, 200),
+    # OpenRef specific:
+    'Scene:Selection': (103, 224, 220),
+    'Scene:Canvas': (24, 24, 24),
+    'Scene:Text': (232, 233, 237),
 }

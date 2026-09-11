@@ -29,7 +29,7 @@ def test_init_without_filenames(open_file_mock, qapp, commandline_args):
     parent = QtWidgets.QMainWindow()
     view = BeeGraphicsView(qapp, parent)
     open_file_mock.assert_not_called()
-    assert view.parent.windowTitle() == 'BeeRef'
+    assert view.parent.windowTitle() == 'OpenRef'
     del view
 
 
@@ -93,7 +93,7 @@ def test_clear_scene(view, item):
     assert view.transform().isIdentity()
     assert view.filename is None
     view.undo_stack.clear.assert_called_once_with()
-    assert view.parent.windowTitle() == 'BeeRef'
+    assert view.parent.windowTitle() == 'OpenRef'
 
 
 def test_reset_previous_transform_when_other_item(view):
@@ -162,7 +162,7 @@ def test_fit_rect_toggle_when_previous(center_mock, fit_mock, view):
     assert view.get_scale() == 2
 
 
-@patch('PyQt6.QtWidgets.QMessageBox.question')
+@patch('beeref.widgets.modern_ui.UnsavedChangesDialog.get_choice')
 def test_get_confirmation_unsaved_changes_when_no_changes(
         dlg_mock, settings, view, item):
     view.scene.addItem(item)
@@ -171,7 +171,7 @@ def test_get_confirmation_unsaved_changes_when_no_changes(
     dlg_mock.assert_not_called()
 
 
-@patch('PyQt6.QtWidgets.QMessageBox.question')
+@patch('beeref.widgets.modern_ui.UnsavedChangesDialog.get_choice')
 def test_get_confirmation_unsaved_changes_when_changes_confirmation_disabled(
         dlg_mock, settings, view, item):
     settings.setValue('Save/confirm_close_unsaved', False)
@@ -182,8 +182,8 @@ def test_get_confirmation_unsaved_changes_when_changes_confirmation_disabled(
     dlg_mock.assert_not_called()
 
 
-@patch('PyQt6.QtWidgets.QMessageBox.question',
-       return_value=QtWidgets.QMessageBox.StandardButton.Yes)
+@patch('beeref.widgets.modern_ui.UnsavedChangesDialog.get_choice',
+       return_value=(1, False))
 def test_get_confirmation_unsaved_changes_when_changes_confirmed(
         dlg_mock, settings, view, item):
     view.undo_stack.push(
@@ -193,8 +193,8 @@ def test_get_confirmation_unsaved_changes_when_changes_confirmed(
     dlg_mock.assert_called_once()
 
 
-@patch('PyQt6.QtWidgets.QMessageBox.question',
-       return_value=QtWidgets.QMessageBox.StandardButton.Cancel)
+@patch('beeref.widgets.modern_ui.UnsavedChangesDialog.get_choice',
+       return_value=(0, False))
 def test_get_confirmation_unsaved_changes_when_changes_not_confirmed(
         dlg_mock, settings, view, item):
     view.undo_stack.push(
@@ -202,6 +202,18 @@ def test_get_confirmation_unsaved_changes_when_changes_not_confirmed(
     assert view.undo_stack.isClean() is False
     assert view.get_confirmation_unsaved_changes('foo') is False
     dlg_mock.assert_called_once()
+
+
+@patch('beeref.widgets.modern_ui.UnsavedChangesDialog.get_choice',
+       return_value=(2, False))
+def test_get_confirmation_unsaved_changes_saves_without_discarding(
+        dlg_mock, view, item):
+    view.undo_stack.push(
+        commands.InsertItems(view.scene, [item], QtCore.QPointF(0, 0)))
+    view.on_action_save = MagicMock()
+
+    assert view.get_confirmation_unsaved_changes('foo') is False
+    view.on_action_save.assert_called_once_with()
 
 
 @patch('beeref.view.BeeGraphicsView.get_confirmation_unsaved_changes',
@@ -606,6 +618,12 @@ def test_on_action_help(show_mock, view):
     show_mock.assert_called_once()
 
 
+@patch('beeref.widgets.AboutDialog.show')
+def test_on_action_about(show_mock, view):
+    view.on_action_about()
+    show_mock.assert_called_once()
+
+
 @patch('beeref.widgets.DebugLogDialog.show')
 def test_on_action_debuglog(show_mock, view):
     with patch('builtins.open', mock_open(read_data='log')) as open_mock:
@@ -902,9 +920,10 @@ def test_on_action_always_on_top_checked(
         show_mock, destroy_mock, create_mock, view):
     view.on_action_always_on_top(True)
     assert view.parent.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
-    show_mock.assert_called_once()
+    assert show_mock.call_count == 2  # Window plus feedback toast
     destroy_mock.assert_called_once()
     create_mock.assert_called_once()
+    assert view._hud_toast.label.text() == 'Always on top enabled'
 
 
 @patch('PyQt6.QtWidgets.QWidget.create')
@@ -914,7 +933,7 @@ def test_on_action_always_on_top_unchecked(
         show_mock, destroy_mock, create_mock, view):
     view.on_action_always_on_top(False)
     assert not (view.parent.windowFlags() & Qt.WindowType.WindowStaysOnTopHint)
-    show_mock.assert_called_once()
+    assert show_mock.call_count == 2  # Window plus feedback toast
     destroy_mock.assert_called_once()
     create_mock.assert_called_once()
 
@@ -934,7 +953,7 @@ def test_on_action_show_titlebar_checked(
         show_mock, destroy_mock, create_mock, view):
     view.on_action_show_titlebar(True)
     assert not (view.parent.windowFlags() & Qt.WindowType.FramelessWindowHint)
-    show_mock.assert_called_once()
+    assert show_mock.call_count == 2  # Window plus feedback toast
     destroy_mock.assert_called_once()
     create_mock.assert_called_once()
 
@@ -946,7 +965,7 @@ def test_on_action_show_titlebar_unchecked(
         show_mock, destroy_mock, create_mock, view):
     view.on_action_show_titlebar(False)
     assert view.parent.windowFlags() & Qt.WindowType.FramelessWindowHint
-    show_mock.assert_called_once()
+    assert show_mock.call_count == 2  # Window plus feedback toast
     destroy_mock.assert_called_once()
     create_mock.assert_called_once()
 
@@ -1100,28 +1119,28 @@ def test_cancel_sample_color_mode_when_multi_selection(view, item):
 def test_update_window_title_no_changes_no_filename(clear_mock, view):
     view.filename = None
     view.update_window_title()
-    assert view.parent.windowTitle() == 'BeeRef'
+    assert view.parent.windowTitle() == 'OpenRef'
 
 
 @patch('PyQt6.QtGui.QUndoStack.isClean', return_value=False)
 def test_update_window_title_changes_no_filename(clear_mock, view):
     view.filename = None
     view.update_window_title()
-    assert view.parent.windowTitle() == '[Untitled]* - BeeRef'
+    assert view.parent.windowTitle() == '[Untitled]* - OpenRef'
 
 
 @patch('PyQt6.QtGui.QUndoStack.isClean', return_value=True)
 def test_update_window_title_no_changes_filename(clear_mock, view):
     view.filename = 'test.bee'
     view.update_window_title()
-    assert view.parent.windowTitle() == 'test.bee - BeeRef'
+    assert view.parent.windowTitle() == 'test.bee - OpenRef'
 
 
 @patch('PyQt6.QtGui.QUndoStack.isClean', return_value=False)
 def test_update_window_title_changes_filename(clear_mock, view):
     view.filename = 'test.bee'
     view.update_window_title()
-    assert view.parent.windowTitle() == 'test.bee* - BeeRef'
+    assert view.parent.windowTitle() == 'test.bee* - OpenRef'
 
 
 @patch('beeref.view.BeeGraphicsView.recalc_scene_rect')
@@ -1361,7 +1380,8 @@ def test_mouse_press_sample_color_when_color(
     view.mousePressEvent(event)
     assert QtWidgets.QApplication.clipboard().text() == '#ff0000'
     notification_mock.assert_called_once_with(
-        view, 'Copied color to clipboard: #ff0000')
+        view, 'Copied color to clipboard: #ff0000',
+        icon='◉', shortcut='S', duration=None)
     assert view.active_mode is None
     view.scene.sample_color_at.assert_called_once()
     mouse_event_mock.assert_not_called()
@@ -1381,7 +1401,8 @@ def test_mouse_press_sample_color_when_color_with_alpha(
     view.mousePressEvent(event)
     assert QtWidgets.QApplication.clipboard().text() == '#ff000064'
     notification_mock.assert_called_once_with(
-        view, 'Copied color to clipboard: #ff000064')
+        view, 'Copied color to clipboard: #ff000064',
+        icon='◉', shortcut='S', duration=None)
     assert view.active_mode is None
     view.scene.sample_color_at.assert_called_once()
     mouse_event_mock.assert_not_called()
@@ -1417,7 +1438,8 @@ def test_mouse_press_move_window(cursor_mock, mouse_event_mock, view):
     view.mousePressEvent(event)
     assert view.active_mode is None
     assert view.movewin_active is True
-    assert view.event_start == view.mapToGlobal(QtCore.QPointF(10.0, 20.0))
+    # QCursor.pos() is already in global coordinates.
+    assert view.event_start == QtCore.QPointF(10.0, 20.0)
     mouse_event_mock.assert_not_called()
     event.accept.assert_called_once_with()
 
@@ -1527,8 +1549,12 @@ def test_mouse_move_movewin(move_mock, mouse_event_mock, view):
     view.event_start = QtCore.QPointF(10.0, 20.0)
     event = MagicMock()
     event.position.return_value = QtCore.QPointF(15.0, 18.0)
+    global_pos = view.mapToGlobal(event.position())
+    delta = global_pos - view.event_start
+    expected = QtCore.QPointF(
+        view.parent.x() + delta.x(), view.parent.y() + delta.y())
     view.mouseMoveEvent(event)
-    move_mock.assert_called_once_with(5, -2)
+    move_mock.assert_called_once_with(int(expected.x()), int(expected.y()))
     mouse_event_mock.assert_not_called()
     event.accept.assert_called_once_with()
 

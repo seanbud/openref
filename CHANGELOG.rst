@@ -1,3 +1,47 @@
+0.4.0 - Unreleased
+==================
+
+Added
+-----
+
+* Canvas drawing tools: pressure-aware pen, line, rectangle, ellipse and
+  stroke eraser, with solid, dotted and arrow styles.
+* Floating drawing toolbar and efficient drawing shortcuts.
+* Double-click editing for saved drawing items and full undo/redo support for
+  drawing sessions.
+* Searchable command palette (Ctrl + Shift + P).
+* Drawing persistence in ``.bee`` files and inclusion in raster/SVG exports.
+* Bottom-center action feedback HUD with shortcut hints, message replacement,
+  timed hold, and eased fade-out animation.
+* Compact drawing dock with anchored tool, thickness, and line-style popovers.
+* Purpose-built pen color picker, hover-revealed frameless window controls,
+  and a three-way save/discard/cancel warning.
+* Live pen-color preview in the drawing dock while the color picker is open.
+* OpenRef Midnight, Graphite, and Soft Light themes, with configurable drawing
+  toolbar placement in any canvas corner.
+* In-app license, corresponding-source, and contributor-attribution screens.
+
+Changed
+-------
+
+* Renamed the application and public fork to OpenRef, with a distinct desktop
+  icon and updated application/package metadata.
+* Refreshed the dark theme and reduced the empty board to Browse and Help.
+* Native title bars are now the default. Frameless canvas mode remains an
+  explicit view option with hover-revealed window controls.
+* Reduced canvas UI scale and redrew drawing/chrome icons around OpenRef's own
+  visual language, with one-pixel black window and dock outlines.
+* Batched SQLite item writes and accelerated color sampling on large images.
+* Library imports no longer consume unrelated host-process command-line flags.
+* Added shortcuts for always-on-top, fullscreen, focusing the canvas or
+  selection, and changing item depth.
+* Added GPLv3, exact-source, and attribution material to every installer.
+
+The drawing foundation was contributed by Cinderflame-Linear in PR #150.
+Performance work draws from PR #154 by Feihei, and command-line parsing from
+PR #117 by DarkDefender.
+
+
 0.3.4-dev (unreleased)
 ======================
 

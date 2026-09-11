@@ -19,7 +19,6 @@ import os.path
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
-from beeref.config import BeeSettings
 from beeref.main_controls import MainControlsMixin
 
 
@@ -65,6 +64,8 @@ class RecentFilesView(QtWidgets.QListView):
 
     def sizeHint(self):
         size = QtCore.QSize()
+        if not self.files:
+            return size
         height = sum(
             (self.sizeHintForRow(i) + 2) for i in range(len(self.files)))
         width = max(self.sizeHintForColumn(i) for i in range(len(self.files)))
@@ -84,58 +85,85 @@ class RecentFilesView(QtWidgets.QListView):
         super().mouseMoveEvent(event)
 
 
-class WelcomeOverlay(MainControlsMixin, QtWidgets.QWidget):
-    """Some basic info to be displayed when the scene is empty."""
+class DropArtwork(QtWidgets.QWidget):
+    """Muted image/drop mark used on an empty canvas."""
 
-    txt = """<p>Paste or drop images here.</p>
-             <p>Right-click for more options.</p>"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedSize(130, 108)
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        painter.scale(self.width() / 180, self.height() / 150)
+        color = QtGui.QColor('#666666')
+        pen = QtGui.QPen(color, 4)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setDashPattern([5, 5])
+        painter.setPen(pen)
+        painter.drawRoundedRect(QtCore.QRectF(25, 45, 130, 85), 2, 2)
+        painter.setBrush(QtGui.QColor('#181818'))
+        pen.setStyle(Qt.PenStyle.SolidLine)
+        painter.setPen(pen)
+        painter.drawRoundedRect(QtCore.QRectF(48, 18, 85, 70), 6, 6)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(color)
+        mountain = QtGui.QPainterPath()
+        mountain.moveTo(56, 79)
+        mountain.lineTo(80, 52)
+        mountain.lineTo(96, 67)
+        mountain.lineTo(112, 45)
+        mountain.lineTo(127, 79)
+        mountain.closeSubpath()
+        painter.drawPath(mountain)
+        painter.drawEllipse(QtCore.QPointF(69, 37), 8, 8)
+
+
+class WelcomeOverlay(MainControlsMixin, QtWidgets.QWidget):
+    """Quiet empty-canvas prompt with only the two useful next actions."""
 
     def __init__(self, parent):
         super().__init__(parent)
         self.control_target = parent
+        self.setObjectName('welcomeOverlay')
         self.setAutoFillBackground(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.init_main_controls(main_window=parent.parent)
 
-        # Recent files
-        self.files_widget = QtWidgets.QWidget(self)
-        files_layout = QtWidgets.QVBoxLayout()
-        files_layout.addStretch(50)
-        files_layout.addWidget(
-            QtWidgets.QLabel('<h3>Recent Files</h3>', self))
         self.files_view = RecentFilesView(self, parent)
-        files_layout.addWidget(self.files_view)
-        files_layout.addStretch(50)
-        self.files_widget.setLayout(files_layout)
-        self.files_widget.hide()
+        self.files_view.hide()
+        self.artwork = DropArtwork(self)
+        self.label = QtWidgets.QLabel(
+            'Drag and drop images here\nor', self)
+        self.label.setObjectName('welcomeMessage')
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.browse_button = QtWidgets.QPushButton('Browse', self)
+        self.browse_button.setObjectName('welcomeBrowse')
+        self.browse_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.browse_button.clicked.connect(parent.on_action_insert_images)
+        self.help_button = QtWidgets.QPushButton('Help', self)
+        self.help_button.setObjectName('welcomeHelp')
+        self.help_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.help_button.clicked.connect(parent.on_action_help)
 
-        # Help text
-        self.label = QtWidgets.QLabel(self.txt, self)
-        self.label.setAlignment(Qt.AlignmentFlag.AlignVCenter
-                                | Qt.AlignmentFlag.AlignCenter)
-        self.layout = QtWidgets.QHBoxLayout()
-        self.layout.addStretch(50)
-        self.layout.addWidget(self.label)
-        self.layout.addStretch(50)
-        self.setLayout(self.layout)
-
-    def show(self):
-        files = BeeSettings().get_recent_files(existing_only=True)
-        self.files_view.update_files(files)
-        if files and self.layout.indexOf(self.files_widget) < 0:
-            self.layout.insertWidget(0, self.files_widget)
-            self.files_widget.show()
-        super().show()
+        center = QtWidgets.QVBoxLayout()
+        center.setSpacing(10)
+        center.addWidget(self.artwork, alignment=Qt.AlignmentFlag.AlignCenter)
+        center.addWidget(self.label, alignment=Qt.AlignmentFlag.AlignCenter)
+        center.addWidget(
+            self.browse_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        center.addWidget(
+            self.help_button, alignment=Qt.AlignmentFlag.AlignCenter)
+        self.layout = QtWidgets.QVBoxLayout(self)
+        self.layout.addStretch(1)
+        self.layout.addLayout(center)
+        self.layout.addStretch(1)
 
     def disable_mouse_events(self):
-        self.files_view.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
     def enable_mouse_events(self):
-        self.files_view.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
-            on=False)
         self.label.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents,
             on=False)

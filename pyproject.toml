@@ -6,16 +6,19 @@ build-backend = "setuptools.build_meta"
 include = ["beeref*"]
 
 [tool.setuptools.package-data]
-"*" = ["*.html", "*.png"]
+"*" = ["*.html", "*.png", "*.ico", "*.icns"]
 
 [project]
-name = "BeeRef"
-version = "0.3.4-dev"
-description = "A simple reference image viewer"
+name = "OpenRef"
+version = "0.4.0-dev"
+description = "A free, modern, canvas-first reference board"
 readme = "README.rst"
 license = {file = "LICENSE"}
 authors = [
     { name = "Rebecca Breu", email = "rebecca@rbreu.de" },
+]
+maintainers = [
+    { name = "Sean Budning" },
 ]
 requires-python = ">=3.9,<3.13"
 dependencies = [
@@ -25,13 +28,16 @@ dependencies = [
     "pyQt6>=6.7.0,<=6.7.0",
     "rectangle-packer>=2.0.1,<=2.0.2",
 ]
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+]
 
 [project.gui-scripts]
+openref = "beeref.__main__:main"
 beeref = "beeref.__main__:main"
 
 [project.urls]
-Homepage = "https://beeref.org/"
-Repository = "https://github.com/rbreu/beeref"
-# Documentation =
-Issues = "https://github.com/rbreu/beeref/issues"
-Changelog = "https://github.com/rbreu/beeref/blob/main/CHANGELOG.rst"
+Homepage = "https://github.com/seanbud/openref"
+Repository = "https://github.com/seanbud/openref"
+Issues = "https://github.com/seanbud/openref/issues"
+Changelog = "https://github.com/seanbud/openref/blob/main/CHANGELOG.rst"

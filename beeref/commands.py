@@ -326,6 +326,27 @@ class ChangeText(QtGui.QUndoCommand):
         self.item.setPlainText(self.old_text)
 
 
+class ChangeDrawing(QtGui.QUndoCommand):
+    """Store an edit session on an existing vector drawing."""
+
+    def __init__(self, item, new_strokes, old_strokes,
+                 ignore_first_redo=False):
+        super().__init__('Edit drawing')
+        self.item = item
+        self.new_strokes = new_strokes
+        self.old_strokes = old_strokes
+        self.ignore_first_redo = ignore_first_redo
+
+    def redo(self):
+        if self.ignore_first_redo:
+            self.ignore_first_redo = False
+            return
+        self.item.replace_strokes(self.new_strokes)
+
+    def undo(self):
+        self.item.replace_strokes(self.old_strokes)
+
+
 class ChangeOpacity(QtGui.QUndoCommand):
     """Change opacity on images."""
 

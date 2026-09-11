@@ -101,11 +101,28 @@ def test_change_opacity_dialog_reject(view, item):
     assert len(stack) == 0
 
 
-@patch('PyQt6.QtCore.QTimer.singleShot')
-def test_bee_notification(single_shot_mock, view):
-    widget = BeeNotification(view, 'Hello World')
+def test_bee_notification(view):
+    widget = BeeNotification(
+        view, 'Hello World', icon='◉', shortcut='Ctrl+S')
     assert widget.label.text() == 'Hello World'
-    single_shot_mock.assert_called_once_with(1000 * 3, widget.deleteLater)
+    assert widget.icon.text() == '◉'
+    assert widget.shortcut.text() == 'Ctrl+S'
+    assert widget.hold_timer.isActive()
+    assert widget.hold_timer.interval() == widget.HOLD_MS
+    assert widget.parent() is view
+
+
+def test_bee_notification_replaces_and_fades(view):
+    widget = BeeNotification(view, 'First')
+    widget.present('Second', icon='↑', shortcut='Up', duration=800)
+    assert widget.label.text() == 'Second'
+    assert widget.icon.text() == '↑'
+    assert widget.shortcut.text() == 'Up'
+    assert widget.hold_timer.interval() == 800
+
+    widget.start_fade()
+    assert widget.fade.endValue() == 0.0
+    assert widget.fade.state() == widget.fade.State.Running
 
 
 def test_sample_color_widget(view):

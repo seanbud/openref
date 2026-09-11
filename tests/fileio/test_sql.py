@@ -10,7 +10,7 @@ import pytest
 from beeref.fileio import schema, is_bee_file
 from beeref.fileio.errors import BeeFileIOError
 from beeref.fileio.sql import SQLiteIO
-from beeref.items import BeePixmapItem, BeeTextItem, BeeErrorItem
+from beeref.items import BeePixmapItem, BeeTextItem, BeeErrorItem, BeePathItem
 
 
 @pytest.mark.parametrize('filename,expected',
@@ -545,6 +545,28 @@ def test_sqliteio_read_reads_readonly_text_item(tmpfile, view):
     assert item.flip() == -1
     assert item.toPlainText() == 'foo bar'
     assert view.scene.items_to_add.empty() is True
+
+
+def test_sqliteio_roundtrips_drawing_item(tmpfile, view):
+    strokes = [{
+        'tool': 'ellipse', 'style': 'dotted',
+        'color': [20, 140, 240, 220], 'base_size': 7,
+        'points': [{'x': 0, 'y': 0}, {'x': 80, 'y': 50}],
+    }]
+    item = BeePathItem(strokes)
+    item._update_bounding_rect()
+    item.setPos(12, 34)
+    view.scene.addItem(item)
+
+    SQLiteIO(tmpfile, view.scene, create_new=True).write()
+    view.scene.clear()
+    SQLiteIO(tmpfile, view.scene, readonly=True).read()
+    view.scene.add_queued_items()
+
+    loaded = list(view.scene.items_by_type('path'))
+    assert len(loaded) == 1
+    assert loaded[0].strokes == strokes
+    assert loaded[0].pos() == QtCore.QPointF(12, 34)
 
 
 def test_sqliteio_read_reads_readonly_pixmap_item(tmpfile, view, imgdata3x3):

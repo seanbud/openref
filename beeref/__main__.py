@@ -28,6 +28,7 @@ from beeref.assets import BeeAssets
 from beeref.config import CommandlineArgs, BeeSettings, logfile_name
 from beeref.utils import create_palette_from_dict
 from beeref.view import BeeGraphicsView
+from beeref.theme import apply_theme
 
 logger = logging.getLogger(__name__)
 
@@ -49,9 +50,14 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
 
     def __init__(self, app):
         super().__init__()
+        self.setObjectName('openRefWindow')
         app.setOrganizationName(constants.APPNAME)
         app.setApplicationName(constants.APPNAME)
+        app.setApplicationDisplayName(constants.APPNAME)
+        app.setDesktopFileName('org.openref.OpenRef')
         self.setWindowIcon(BeeAssets().logo)
+        app.setWindowIcon(BeeAssets().logo)
+        self.setContentsMargins(1, 1, 1, 1)
         self.view = BeeGraphicsView(app, self)
         default_window_size = QtCore.QSize(500, 300)
         geom = self.view.settings.value('MainWindow/geometry')
@@ -113,6 +119,7 @@ def main():
 
     os.environ["QT_DEBUG_PLUGINS"] = "1"
     app = BeeRefApplication(sys.argv)
+    apply_theme(app, settings.valueOrDefault('Appearance/theme'))
     palette = create_palette_from_dict(constants.COLORS)
     app.setPalette(palette)
     bee = BeeRefMainWindow(app)  # NOQA:F841
@@ -125,7 +132,7 @@ def main():
     app.exec()
     del bee
     del app
-    logger.debug('BeeRef closed')
+    logger.debug('OpenRef closed')
     QtCore.qInstallMessageHandler(None)
 
 

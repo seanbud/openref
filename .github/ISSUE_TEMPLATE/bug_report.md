@@ -12,7 +12,7 @@ A clear and concise description of what the bug is.
 
 **System info**
 
-BeeRef version number:
+OpenRef version number:
 Your operating system:
 
 **To Reproduce**
@@ -28,4 +28,4 @@ A clear and concise description of what you expected to happen.
 If applicable, add screenshots to help explain your problem.
 
 **Debug log:**
- For crashes and similar, provide the last 20 lines or so of your debug log. To get the debug log, open BeeRef and go to *Help -> Show Debug Log*. If in doubt, paste the whole debug log to a paste service like paste.bin
+ For crashes and similar, provide the last 20 lines or so of your debug log. To get the debug log, open OpenRef and go to *Help -> Show Debug Log*. If in doubt, paste the whole debug log to a paste service such as pastebin.

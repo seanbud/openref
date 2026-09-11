@@ -282,8 +282,10 @@ class SQLiteIO:
                 self.worker.progress.emit(i)
                 if self.worker.canceled:
                     break
+        num_deleted = len(to_delete)
         self.delete_items(to_delete)
-        self.ex('VACUUM')
+        if num_deleted > 10:
+            self.ex('VACUUM')
         self.connection.commit()
         if self.worker:
             self.worker.finished.emit(self.filename, [])
@@ -292,7 +294,6 @@ class SQLiteIO:
         to_delete = [(pk,) for pk in to_delete]
         self.exmany('DELETE FROM items WHERE id=?', to_delete)
         self.exmany('DELETE FROM sqlar WHERE item_id=?', to_delete)
-        self.connection.commit()
 
     def insert_item(self, item):
         self.ex(
@@ -311,7 +312,6 @@ class SQLiteIO:
                 'INSERT INTO sqlar (item_id, name, mode, sz, data) '
                 'VALUES (?, ?, ?, ?, ?)',
                 (item.save_id, name, 0o644, len(pixmap), pixmap))
-        self.connection.commit()
 
     def update_item(self, item):
         """Update item data.
@@ -327,4 +327,3 @@ class SQLiteIO:
              item.rotation(), item.flip(),
              json.dumps(item.get_extra_save_data()),
              item.save_id))
-        self.connection.commit()

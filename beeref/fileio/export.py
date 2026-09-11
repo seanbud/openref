@@ -227,6 +227,22 @@ class SceneToSVGExporter(SceneExporterBase):
                         'image-rendering': ('crisp-edges' if item.scale() > 2
                                             else 'optimizeQuality')})
                 pos = pos + item.crop.topLeft()
+            if item.TYPE == 'path':
+                image, drawing_rect = item.render_to_image()
+                byte_array = QtCore.QByteArray()
+                buffer = QtCore.QBuffer(byte_array)
+                buffer.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+                image.save(buffer, 'PNG')
+                encoded = base64.b64encode(
+                    byte_array.data()).decode('ascii')
+                element = ET.Element(
+                    'image',
+                    attrib={
+                        'xlink:href': f'data:image/png;base64,{encoded}',
+                        'width': str(drawing_rect.width() * item.scale()),
+                        'height': str(drawing_rect.height() * item.scale()),
+                        'image-rendering': 'optimizeQuality'})
+                pos = pos + drawing_rect.topLeft() * item.scale()
 
             transforms = []
             if item.flip() == -1:

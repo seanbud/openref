@@ -1,21 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop">
-    <id>org.beeref.BeeRef</id>
-    <launchable type="desktop-id">org.beeref.BeeRef.desktop</launchable>
-    <name>BeeRef</name>
-    <developer_name>BeeRef</developer_name>
-    <summary>A simple reference image viewer</summary>
+    <id>org.openref.OpenRef</id>
+    <launchable type="desktop-id">org.openref.OpenRef.desktop</launchable>
+    <name>OpenRef</name>
+    <developer_name>OpenRef contributors</developer_name>
+    <summary>A free, modern reference canvas</summary>
     <metadata_license>CC0-1.0</metadata_license>
     <project_license>GPL-3.0</project_license>
-    <url type="homepage">https://beeref.org/</url>
+    <url type="homepage">https://github.com/seanbud/openref</url>
 
     <description>
-        <p>BeeRef lets you quickly arrange your reference images and view them while you create. Its minimal interface is designed not to get in the way of your creative process.</p>
+        <p>OpenRef is a free reference canvas for arranging images and
+        drawing visual notes without getting in the way of creative work.</p>
     </description>
 
     <screenshots>
         <screenshot type="default">
-            <image>https://raw.githubusercontent.com/rbreu/beeref/main/images/screenshot.png</image>
+            <image>https://raw.githubusercontent.com/seanbud/openref/main/images/screenshot.png</image>
         </screenshot>
     </screenshots>
 

@@ -5,8 +5,10 @@ from PyQt6 import QtWidgets
 from beeref.widgets.settings import (
     ArrangeGapWidget,
     ConfirmCloseUnsavedWidget,
+    DrawingToolbarPositionWidget,
     ImageStorageFormatWidget,
     SettingsDialog,
+    ThemeWidget,
 )
 
 
@@ -117,6 +119,29 @@ def test_confirm_closed_on_restore_defaults(settings, view):
     widget.on_restore_defaults()
     assert widget.input.isChecked() is True
     assert widget.title() == 'Confirm when closing an unsaved file:'
+
+
+def test_theme_widget_defaults_to_openref_midnight(settings, view):
+    widget = ThemeWidget()
+    assert widget.buttons['midnight'].isChecked()
+
+
+def test_theme_widget_saves_selection(settings, view):
+    widget = ThemeWidget()
+    widget.set_value('light')
+    assert settings.valueOrDefault('Appearance/theme') == 'light'
+
+
+def test_toolbar_position_defaults_to_bottom_right(settings, view):
+    widget = DrawingToolbarPositionWidget()
+    assert widget.buttons['bottom-right'].isChecked()
+
+
+def test_toolbar_position_saves_selection(settings, view):
+    widget = DrawingToolbarPositionWidget()
+    widget.set_value('top-left')
+    assert settings.valueOrDefault(
+        'Appearance/drawing_toolbar_position') == 'top-left'
 
 
 @patch('PyQt6.QtWidgets.QMessageBox.question',

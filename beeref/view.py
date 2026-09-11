@@ -14,7 +14,9 @@
 # along with BeeRef.  If not, see <https://www.gnu.org/licenses/>.
 
 from functools import partial
+import copy
 import logging
+import math
 import os
 import os.path
 
@@ -23,7 +25,12 @@ from PyQt6.QtCore import Qt
 
 from beeref.actions import ActionsMixin, actions
 from beeref import commands
-from beeref.config import CommandlineArgs, BeeSettings, KeyboardSettings
+from beeref.config import (
+    CommandlineArgs,
+    BeeSettings,
+    KeyboardSettings,
+    settings_events,
+)
 from beeref import constants
 from beeref import fileio
 from beeref.fileio.errors import IMG_LOADING_ERROR_MSG
@@ -70,12 +77,19 @@ class BeeGraphicsView(MainControlsMixin,
         self.filename = None
         self.previous_transform = None
         self.active_mode = None
+        self._hud_toast = None
+        self._ready_for_feedback = False
+        self._syncing_actions = False
         self.draw_item = None
         self.draw_current_stroke = None
-        self.draw_brush_size = 20.0
-        self.draw_brush_color = [200, 200, 200, 255]
+        self.draw_brush_size = 8.0
+        self.draw_brush_color = [235, 235, 238, 255]
+        self.draw_tool = 'pen'
+        self.draw_style = 'solid'
+        self._draw_editing_existing = False
+        self._draw_original_strokes = None
+        self._draw_panning = False
         self._tablet_pressure = 1.0
-        self._suppress_context_menu = False
 
         self.scene = BeeGraphicsScene(self.undo_stack)
         self.scene.changed.connect(self.on_scene_changed)
@@ -88,6 +102,27 @@ class BeeGraphicsView(MainControlsMixin,
         self.build_menu_and_actions()
         self.control_target = self
         self.init_main_controls(main_window=parent)
+        self.draw_toolbar = widgets.drawing_toolbar.DrawingToolbar(
+            self.viewport())
+        self.draw_toolbar.tool_changed.connect(self.set_draw_tool)
+        self.draw_toolbar.style_changed.connect(self.set_draw_style)
+        self.draw_toolbar.width_changed.connect(self.set_draw_width)
+        self.draw_toolbar.color_requested.connect(
+            self.on_action_set_brush_color)
+        self.draw_toolbar.close_requested.connect(
+            lambda: self.exit_draw_mode(commit=True))
+        self.draw_toolbar.hide()
+        pin_action = actions.actions['always_on_top'].qaction
+        self.window_chrome = widgets.modern_ui.WindowChrome(
+            self, parent,
+            lambda checked: pin_action.setChecked(checked),
+            close_callback=self.on_action_quit,
+            hover_targets=(self.viewport(), self.welcome_overlay))
+        self.window_chrome.set_pinned(pin_action.isChecked())
+        self.window_chrome.set_enabled(bool(
+            parent.windowFlags() & Qt.WindowType.FramelessWindowHint))
+        settings_events.appearance_changed.connect(
+            self.on_appearance_changed)
 
         # Load files given via command line
         if commandline_args.filenames:
@@ -98,6 +133,26 @@ class BeeGraphicsView(MainControlsMixin,
                 self.do_insert_images(commandline_args.filenames)
 
         self.update_window_title()
+        self._ready_for_feedback = True
+
+    def show_feedback(self, text, icon='✓', action_id=None,
+                      shortcut=None, duration=None):
+        """Show transient canvas feedback for a completed user action."""
+
+        if not self._ready_for_feedback:
+            return
+        if shortcut is None and action_id:
+            definition = actions.actions.get(action_id)
+            if definition and definition.qaction:
+                shortcut = definition.qaction.shortcut().toString(
+                    QtGui.QKeySequence.SequenceFormat.NativeText)
+        if self._hud_toast is None:
+            self._hud_toast = widgets.BeeNotification(
+                self, text, icon=icon, shortcut=shortcut,
+                duration=duration)
+        else:
+            self._hud_toast.present(
+                text, icon=icon, shortcut=shortcut, duration=duration)
 
     @property
     def filename(self):
@@ -113,10 +168,12 @@ class BeeGraphicsView(MainControlsMixin,
 
     def cancel_active_modes(self):
         self.scene.cancel_active_modes()
-        self.cancel_sample_color_mode()
         if self.active_mode == self.DRAW_MODE:
             self.exit_draw_mode(commit=True)
-        self.active_mode = None
+        elif self.active_mode == self.SAMPLE_COLOR_MODE:
+            self.cancel_sample_color_mode()
+        else:
+            self.active_mode = None
 
     def cancel_sample_color_mode(self):
         logger.debug('Cancel sample color mode')
@@ -163,9 +220,6 @@ class BeeGraphicsView(MainControlsMixin,
         self.update_window_title()
 
     def on_context_menu(self, point):
-        if self._suppress_context_menu:
-            self._suppress_context_menu = False
-            return
         self.context_menu.exec(self.mapToGlobal(point))
 
     def get_supported_image_formats(self, cls):
@@ -220,13 +274,20 @@ class BeeGraphicsView(MainControlsMixin,
     def get_confirmation_unsaved_changes(self, msg):
         confirm = self.settings.valueOrDefault('Save/confirm_close_unsaved')
         if confirm and not self.undo_stack.isClean():
-            answer = QtWidgets.QMessageBox.question(
-                self,
-                'Discard unsaved changes?',
-                msg,
-                QtWidgets.QMessageBox.StandardButton.Yes |
-                QtWidgets.QMessageBox.StandardButton.Cancel)
-            return answer == QtWidgets.QMessageBox.StandardButton.Yes
+            choice, remember = (
+                widgets.modern_ui.UnsavedChangesDialog.get_choice(self, msg))
+            if choice == widgets.modern_ui.UnsavedChangesDialog.SAVE:
+                self.on_action_save()
+                self.show_feedback(
+                    'Saving—repeat the action when complete', '✓',
+                    duration=2200)
+                return False
+            if choice == widgets.modern_ui.UnsavedChangesDialog.DISCARD:
+                if remember:
+                    self.settings.setValue(
+                        'Save/confirm_close_unsaved', False)
+                return True
+            return False
 
         return True
 
@@ -238,16 +299,24 @@ class BeeGraphicsView(MainControlsMixin,
             self.clear_scene()
 
     def on_action_fit_scene(self):
+        if self.active_mode == self.DRAW_MODE:
+            self.set_draw_style('solid')
+            return
         self.fit_rect(self.scene.itemsBoundingRect())
+        self.show_feedback('Canvas framed', '⌗', 'fit_scene')
 
     def on_action_fit_selection(self):
         self.fit_rect(self.scene.itemsBoundingRect(selection_only=True))
+        self.show_feedback('Selection framed', '⌗', 'fit_selection')
 
     def on_action_fullscreen(self, checked):
         if checked:
             self.parent.showFullScreen()
         else:
             self.parent.showNormal()
+        self.show_feedback(
+            'Fullscreen enabled' if checked else 'Fullscreen disabled',
+            '⛶', 'fullscreen')
 
     def on_action_always_on_top(self, checked):
         self.parent.setWindowFlag(
@@ -255,6 +324,12 @@ class BeeGraphicsView(MainControlsMixin,
         self.parent.destroy()
         self.parent.create()
         self.parent.show()
+        if hasattr(self, 'window_chrome'):
+            self.window_chrome.set_pinned(checked)
+        self.show_feedback(
+            'Always on top enabled' if checked
+            else 'Always on top disabled',
+            '◧', 'always_on_top')
 
     def on_action_show_scrollbars(self, checked):
         if checked:
@@ -267,12 +342,18 @@ class BeeGraphicsView(MainControlsMixin,
                 Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
             self.setVerticalScrollBarPolicy(
                 Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.show_feedback(
+            'Scrollbars shown' if checked else 'Scrollbars hidden',
+            '☷', 'show_scrollbars')
 
     def on_action_show_menubar(self, checked):
         if checked:
             self.parent.setMenuBar(self.create_menubar())
         else:
             self.parent.setMenuBar(None)
+        self.show_feedback(
+            'Menu bar shown' if checked else 'Menu bar hidden',
+            '≡', 'show_menubar')
 
     def on_action_show_titlebar(self, checked):
         self.parent.setWindowFlag(
@@ -280,35 +361,56 @@ class BeeGraphicsView(MainControlsMixin,
         self.parent.destroy()
         self.parent.create()
         self.parent.show()
+        if hasattr(self, 'window_chrome'):
+            self.window_chrome.set_enabled(not checked)
+        self.show_feedback(
+            'Title bar shown' if checked else 'Title bar hidden',
+            '▭', 'show_titlebar')
 
     def on_action_move_window(self):
         if self.welcome_overlay.isHidden():
             self.on_action_movewin_mode()
         else:
             self.welcome_overlay.on_action_movewin_mode()
+        self.show_feedback('Move window · drag anywhere', '✥',
+                           'move_window', duration=2000)
 
     def on_action_undo(self):
         logger.debug('Undo: %s' % self.undo_stack.undoText())
         self.cancel_active_modes()
+        label = self.undo_stack.undoText()
         self.undo_stack.undo()
+        if label:
+            self.show_feedback(f'Undid {label.lower()}', '↶', 'undo')
 
     def on_action_redo(self):
         logger.debug('Redo: %s' % self.undo_stack.redoText())
         self.cancel_active_modes()
+        label = self.undo_stack.redoText()
         self.undo_stack.redo()
+        if label:
+            self.show_feedback(f'Redid {label.lower()}', '↷', 'redo')
 
     def on_action_select_all(self):
         self.scene.select_all_items()
+        count = len(self.scene.selectedItems(user_only=True))
+        self.show_feedback(f'Selected {count} item{"s" if count != 1 else ""}',
+                           '▣', 'select_all')
 
     def on_action_deselect_all(self):
         self.scene.deselect_all_items()
+        self.show_feedback('Selection cleared', '□', 'deselect_all')
 
     def on_action_delete_items(self):
         logger.debug('Deleting items...')
         self.cancel_active_modes()
+        selected = self.scene.selectedItems(user_only=True)
         self.undo_stack.push(
             commands.DeleteItems(
-                self.scene, self.scene.selectedItems(user_only=True)))
+                self.scene, selected))
+        count = len(selected)
+        self.show_feedback(f'Deleted {count} item{"s" if count != 1 else ""}',
+                           '⌫', 'delete')
 
     def on_action_cut(self):
         logger.debug('Cutting items...')
@@ -319,30 +421,43 @@ class BeeGraphicsView(MainControlsMixin,
 
     def on_action_raise_to_top(self):
         self.scene.raise_to_top()
+        self.show_feedback('Brought selection to front', '↑',
+                           'raise_to_top')
 
     def on_action_lower_to_bottom(self):
         self.scene.lower_to_bottom()
+        self.show_feedback('Sent selection to back', '↓',
+                           'lower_to_bottom')
 
     def on_action_normalize_height(self):
         self.scene.normalize_height()
+        self.show_feedback('Matched heights', '↕', 'normalize_height')
 
     def on_action_normalize_width(self):
         self.scene.normalize_width()
+        self.show_feedback('Matched widths', '↔', 'normalize_width')
 
     def on_action_normalize_size(self):
         self.scene.normalize_size()
+        self.show_feedback('Matched sizes', '⤢', 'normalize_size')
 
     def on_action_arrange_horizontal(self):
         self.scene.arrange()
+        self.show_feedback('Arranged horizontally', '↔',
+                           'arrange_horizontal')
 
     def on_action_arrange_vertical(self):
         self.scene.arrange(vertical=True)
+        self.show_feedback('Arranged vertically', '↕',
+                           'arrange_vertical')
 
     def on_action_arrange_optimal(self):
         self.scene.arrange_optimal()
+        self.show_feedback('Optimally arranged', '▦', 'arrange_optimal')
 
     def on_action_arrange_square(self):
         self.scene.arrange_square()
+        self.show_feedback('Arranged in a grid', '▦', 'arrange_square')
 
     def on_action_change_opacity(self):
         images = list(filter(
@@ -351,46 +466,62 @@ class BeeGraphicsView(MainControlsMixin,
         widgets.ChangeOpacityDialog(self, images, self.undo_stack)
 
     def on_action_grayscale(self, checked):
+        if self._syncing_actions:
+            return
         images = list(filter(
             lambda item: item.is_image,
             self.scene.selectedItems(user_only=True)))
         if images:
             self.undo_stack.push(
                 commands.ToggleGrayscale(images, checked))
+            self.show_feedback(
+                'Grayscale enabled' if checked else 'Grayscale disabled',
+                '◐', 'grayscale')
 
     def on_action_crop(self):
         self.scene.crop_items()
+        self.show_feedback('Crop mode · Enter applies · Esc cancels',
+                           '⌗', 'crop', duration=2200)
 
     def on_action_flip_horizontally(self):
         self.scene.flip_items(vertical=False)
+        self.show_feedback('Flipped horizontally', '↔',
+                           'flip_horizontally')
 
     def on_action_flip_vertically(self):
         self.scene.flip_items(vertical=True)
+        self.show_feedback('Flipped vertically', '↕',
+                           'flip_vertically')
 
     def on_action_reset_scale(self):
         self.cancel_active_modes()
         self.undo_stack.push(commands.ResetScale(
             self.scene.selectedItems(user_only=True)))
+        self.show_feedback('Scale reset', '⤢', 'reset_scale')
 
     def on_action_reset_rotation(self):
         self.cancel_active_modes()
         self.undo_stack.push(commands.ResetRotation(
             self.scene.selectedItems(user_only=True)))
+        self.show_feedback('Rotation reset', '↺', 'reset_rotation')
 
     def on_action_reset_flip(self):
         self.cancel_active_modes()
         self.undo_stack.push(commands.ResetFlip(
             self.scene.selectedItems(user_only=True)))
+        self.show_feedback('Flip reset', '⇄', 'reset_flip')
 
     def on_action_reset_crop(self):
         self.cancel_active_modes()
         self.undo_stack.push(commands.ResetCrop(
             self.scene.selectedItems(user_only=True)))
+        self.show_feedback('Crop reset', '⌗', 'reset_crop')
 
     def on_action_reset_transforms(self):
         self.cancel_active_modes()
         self.undo_stack.push(commands.ResetTransforms(
             self.scene.selectedItems(user_only=True)))
+        self.show_feedback('Transforms reset', '↺', 'reset_transforms')
 
     def on_action_show_color_gamut(self):
         widgets.color_gamut.GamutDialog(self, self.scene.selectedItems()[0])
@@ -411,6 +542,8 @@ class BeeGraphicsView(MainControlsMixin,
             self,
             pos,
             self.scene.sample_color_at(self.mapToScene(pos)))
+        self.show_feedback('Color picker · click to copy', '◉',
+                           'sample_color', duration=2000)
 
     def on_action_draw_mode(self):
         if self.active_mode == self.DRAW_MODE:
@@ -418,48 +551,222 @@ class BeeGraphicsView(MainControlsMixin,
         else:
             self.enter_draw_mode()
 
-    def enter_draw_mode(self):
+    def enter_draw_mode(self, item=None):
+        """Enter drawing mode, optionally editing an existing drawing."""
+
         self.cancel_active_modes()
         self.scene.deselect_all_items()
+        self.draw_item = item
+        self._draw_editing_existing = item is not None
+        self._draw_original_strokes = (
+            copy.deepcopy(item.strokes) if item is not None else None)
         self.active_mode = self.DRAW_MODE
         self.viewport().setCursor(Qt.CursorShape.CrossCursor)
         self.setFocus()
         self.welcome_overlay.hide()
+        self.draw_toolbar.set_tool(self.draw_tool)
+        self.draw_toolbar.set_style(self.draw_style)
+        self.draw_toolbar.set_width(self.draw_brush_size)
+        self.draw_toolbar.set_color(QtGui.QColor(*self.draw_brush_color))
+        self._position_draw_toolbar()
+        self.draw_toolbar.show()
+        self.draw_toolbar.raise_()
         logger.debug('Entered draw mode')
+        self.show_feedback('Draw mode enabled', '✎', 'draw_mode')
 
     def exit_draw_mode(self, commit=True):
         logger.debug(f'Exiting draw mode, commit={commit}')
+        drawing_changed = False
         if self.draw_item:
             if self.draw_current_stroke:
                 self.draw_item.add_stroke(self.draw_current_stroke)
                 self.draw_item.temp_stroke = None
                 self.draw_current_stroke = None
-            if commit and self.draw_item.strokes:
+            if self._draw_editing_existing:
+                before = self._draw_original_strokes or []
+                after = copy.deepcopy(self.draw_item.strokes)
+                if not commit:
+                    self.draw_item.replace_strokes(before)
+                elif before != after:
+                    drawing_changed = True
+                    if not after:
+                        # Preserve the original contents inside the delete
+                        # command so undo restores a usable drawing item.
+                        self.draw_item.replace_strokes(before)
+                        self.undo_stack.push(commands.DeleteItems(
+                            self.scene, [self.draw_item]))
+                    else:
+                        self.undo_stack.push(commands.ChangeDrawing(
+                            self.draw_item, after, before,
+                            ignore_first_redo=True))
+            elif commit and self.draw_item.strokes:
+                drawing_changed = True
                 self.scene.removeItem(self.draw_item)
                 self.undo_stack.push(
                     commands.InsertItems(
                         self.scene, [self.draw_item]))
-            else:
+            elif self.draw_item.scene():
                 self.scene.removeItem(self.draw_item)
             self.draw_item = None
+        self._draw_editing_existing = False
+        self._draw_original_strokes = None
+        self._draw_panning = False
         self.active_mode = None
+        self.draw_toolbar.hide()
         self.viewport().unsetCursor()
+        message = 'Drawing saved' if drawing_changed else 'Draw mode disabled'
+        self.show_feedback(message, '✓', 'draw_mode')
+
+    def set_draw_tool(self, tool):
+        self.draw_tool = tool
+        self.draw_toolbar.set_tool(tool)
+        cursor = (Qt.CursorShape.CrossCursor
+                  if tool != 'eraser'
+                  else Qt.CursorShape.PointingHandCursor)
+        self.viewport().setCursor(cursor)
+        if self.active_mode == self.DRAW_MODE:
+            labels = {
+                'pen': ('Pen', '✎', 'D'),
+                'line': ('Line', '╱', 'L'),
+                'rectangle': ('Rectangle', '□', 'R'),
+                'ellipse': ('Ellipse', '○', 'C'),
+                'eraser': ('Eraser', '⌫', 'E'),
+            }
+            label, icon, shortcut = labels[tool]
+            self.show_feedback(label, icon, shortcut=shortcut)
+
+    def set_draw_style(self, style):
+        self.draw_style = style
+        self.draw_toolbar.set_style(style)
+        if self.active_mode == self.DRAW_MODE:
+            labels = {
+                'solid': ('Solid stroke', '━', '1'),
+                'dotted': ('Dotted stroke', '┅', '2'),
+                'arrow': ('Arrow stroke', '↗', '3'),
+            }
+            label, icon, shortcut = labels[style]
+            self.show_feedback(label, icon, shortcut=shortcut)
+
+    def set_draw_width(self, width):
+        self.draw_brush_size = float(width)
+        if self.active_mode == self.DRAW_MODE:
+            self.show_feedback(f'{int(width)} px stroke', '●',
+                               shortcut='[  ]', duration=900)
 
     def on_action_set_brush_color(self):
         current = QtGui.QColor(*self.draw_brush_color)
-        color = QtWidgets.QColorDialog.getColor(
-            current, self, 'Select Brush Color',
-            QtWidgets.QColorDialog.ColorDialogOption.ShowAlphaChannel)
-        if color.isValid():
+        dialog = widgets.modern_ui.ColorPickerDialog(current, self)
+        dialog.color_changed.connect(self.draw_toolbar.set_color)
+        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+            color = dialog.selectedColor()
             self.draw_brush_color = [
                 color.red(), color.green(), color.blue(), color.alpha()]
+            self.draw_toolbar.set_color(color)
+            self.show_feedback(
+                f'Stroke color {color.name().upper()}', '●',
+                shortcut='Ctrl+T')
+        else:
+            self.draw_toolbar.set_color(current)
 
     def on_action_set_brush_size(self):
         size, ok = QtWidgets.QInputDialog.getInt(
             self, 'Brush Size', 'Size (px):',
             int(self.draw_brush_size), 1, 500)
         if ok:
-            self.draw_brush_size = float(size)
+            self.draw_toolbar.set_width(size)
+
+    def on_action_command_palette(self):
+        self.command_palette = widgets.drawing_toolbar.CommandPalette(
+            self, actions.actions.values())
+        center = self.mapToGlobal(self.rect().center())
+        self.command_palette.move(
+            center.x() - self.command_palette.width() // 2,
+            center.y() - self.command_palette.height() // 2)
+        self.command_palette.open()
+
+    def _position_draw_toolbar(self):
+        hint = self.draw_toolbar.sizeHint()
+        margin = 12
+        position = self.settings.valueOrDefault(
+            'Appearance/drawing_toolbar_position')
+        on_right = position.endswith('right')
+        on_bottom = position.startswith('bottom')
+        x = (self.viewport().width() - hint.width() - margin
+             if on_right else margin)
+        y = (self.viewport().height() - hint.height() - margin
+             if on_bottom else margin)
+        x = max(margin, x)
+        y = max(margin, y)
+        self.draw_toolbar.move(x, y)
+
+    def on_appearance_changed(self):
+        from beeref.theme import apply_theme
+
+        apply_theme(
+            self.app, self.settings.valueOrDefault('Appearance/theme'))
+        self._position_draw_toolbar()
+
+    @staticmethod
+    def _constrained_point(start, end, tool):
+        delta = end - start
+        if tool in ('rectangle', 'ellipse'):
+            size = max(abs(delta.x()), abs(delta.y()))
+            return start + QtCore.QPointF(
+                math.copysign(size, delta.x() or 1),
+                math.copysign(size, delta.y() or 1))
+        angle = math.atan2(delta.y(), delta.x())
+        distance = math.hypot(delta.x(), delta.y())
+        snapped = round(angle / (math.pi / 4)) * (math.pi / 4)
+        return start + QtCore.QPointF(
+            math.cos(snapped) * distance,
+            math.sin(snapped) * distance)
+
+    def _new_drawing_at(self, scene_pos):
+        self.draw_item = BeePathItem()
+        self.draw_item.setPos(scene_pos)
+        self.scene.addItem(self.draw_item)
+        self.draw_item.bring_to_front()
+
+    def _find_drawing_at(self, scene_pos, radius):
+        area = QtCore.QRectF(
+            scene_pos.x() - radius, scene_pos.y() - radius,
+            radius * 2, radius * 2)
+        for item in self.scene.items(area):
+            if isinstance(item, BeePathItem):
+                local = item.mapFromScene(scene_pos)
+                if item.stroke_indexes_at(local, radius / item.scale()):
+                    return item
+
+    def _begin_eraser(self, scene_pos):
+        if self.draw_item is None:
+            item = self._find_drawing_at(scene_pos, self.draw_brush_size)
+            if item is None:
+                return
+            self.draw_item = item
+            self._draw_editing_existing = True
+            self._draw_original_strokes = copy.deepcopy(item.strokes)
+        radius = self.draw_brush_size / max(self.draw_item.scale(), 0.001)
+        self.draw_item.erase_at(self.draw_item.mapFromScene(scene_pos), radius)
+
+    def _begin_mark(self, scene_pos):
+        if self.draw_item is None:
+            self._new_drawing_at(scene_pos)
+        local_pos = self.draw_item.mapFromScene(scene_pos)
+        point = {
+            'x': round(local_pos.x(), 2),
+            'y': round(local_pos.y(), 2),
+            'pressure': max(0.05, self._tablet_pressure),
+        }
+        self.draw_current_stroke = {
+            'tool': self.draw_tool,
+            'style': self.draw_style,
+            'color': list(self.draw_brush_color),
+            'base_size': self.draw_brush_size,
+            'points': [point],
+        }
+        self.draw_item.prepareGeometryChange()
+        self.draw_item.temp_stroke = self.draw_current_stroke
+        self.draw_item.update()
 
     def on_items_loaded(self, value):
         logger.debug('On items loaded: add queued items')
@@ -631,7 +938,8 @@ class BeeGraphicsView(MainControlsMixin,
 
     def on_action_quit(self):
         confirm = self.get_confirmation_unsaved_changes(
-            'There are unsaved changes. Are you sure you want to quit?')
+            'You still have unsaved changes in the current scene. '
+            'Do you want to save them before exiting?')
         if confirm:
             logger.info('User quit. Exiting...')
             self.app.quit()
@@ -646,14 +954,7 @@ class BeeGraphicsView(MainControlsMixin,
         widgets.HelpDialog(self)
 
     def on_action_about(self):
-        QtWidgets.QMessageBox.about(
-            self,
-            f'About {constants.APPNAME}',
-            (f'<h2>{constants.APPNAME} {constants.VERSION}</h2>'
-             f'<p>{constants.APPNAME_FULL}</p>'
-             f'<p>{constants.COPYRIGHT}</p>'
-             f'<p><a href="{constants.WEBSITE}">'
-             f'Visit the {constants.APPNAME} website</a></p>'))
+        widgets.AboutDialog(self)
 
     def on_action_debuglog(self):
         widgets.DebugLogDialog(self)
@@ -682,6 +983,11 @@ class BeeGraphicsView(MainControlsMixin,
         self.undo_stack.endMacro()
         if new_scene:
             self.on_action_fit_scene()
+        inserted = len(self.scene.selectedItems(user_only=True))
+        if inserted:
+            self.show_feedback(
+                f'Added {inserted} image{"s" if inserted != 1 else ""}',
+                '▣', 'insert_images')
 
     def do_insert_images(self, filenames, pos=None):
         if not pos:
@@ -714,11 +1020,16 @@ class BeeGraphicsView(MainControlsMixin,
         self.do_insert_images(filenames)
 
     def on_action_insert_text(self):
+        # Keep the color picker available while draw mode owns focus.
+        if self.active_mode == self.DRAW_MODE:
+            self.on_action_set_brush_color()
+            return
         self.cancel_active_modes()
         item = BeeTextItem()
         pos = self.mapToScene(self.mapFromGlobal(self.cursor().pos()))
         item.setScale(1 / self.get_scale())
         self.undo_stack.push(commands.InsertItems(self.scene, [item], pos))
+        self.show_feedback('Note added', '✎', 'insert_text')
 
     def on_action_copy(self):
         logger.debug('Copying to clipboard...')
@@ -738,6 +1049,9 @@ class BeeGraphicsView(MainControlsMixin,
         # that we know to look up the internal clipboard when pasting:
         clipboard.mimeData().setData(
             'beeref/items', QtCore.QByteArray.number(len(items)))
+        self.show_feedback(
+            f'Copied {len(items)} item{"s" if len(items) != 1 else ""}',
+            '⎘', 'copy')
 
     def on_action_paste(self):
         self.cancel_active_modes()
@@ -746,12 +1060,15 @@ class BeeGraphicsView(MainControlsMixin,
         pos = self.mapToScene(self.mapFromGlobal(self.cursor().pos()))
 
         # See if we need to look up the internal clipboard:
-        data = clipboard.mimeData().data('beeref/items')
+        mime_data = clipboard.mimeData()
+        data = (mime_data.data('beeref/items')
+                if mime_data is not None else QtCore.QByteArray())
         logger.debug(f'Custom data in clipboard: {data}')
         if data and self.scene.internal_clipboard:
             # Checking that internal clipboard exists since the user
             # may have opened a new scene since copying.
             self.scene.paste_from_internal_clipboard(pos)
+            self.show_feedback('Pasted items', '⎘', 'paste')
             return
 
         img = clipboard.image()
@@ -761,17 +1078,19 @@ class BeeGraphicsView(MainControlsMixin,
             if len(self.scene.items()) == 1:
                 # This is the first image in the scene
                 self.on_action_fit_scene()
+            self.show_feedback('Pasted image', '▣', 'paste')
             return
         text = clipboard.text()
         if text:
             item = BeeTextItem(text)
             item.setScale(1 / self.get_scale())
             self.undo_stack.push(commands.InsertItems(self.scene, [item], pos))
+            self.show_feedback('Pasted note', '✎', 'paste')
             return
 
         msg = 'No image data or text in clipboard or image too big'
         logger.info(msg)
-        widgets.BeeNotification(self, msg)
+        self.show_feedback(msg, '!', 'paste', duration=2400)
 
     def on_action_open_settings_dir(self):
         dirname = os.path.dirname(self.settings.fileName())
@@ -779,17 +1098,28 @@ class BeeGraphicsView(MainControlsMixin,
             QtCore.QUrl.fromLocalFile(dirname))
 
     def on_selection_changed(self):
+        try:
+            selected_items = self.scene.selectedItems(user_only=True)
+        except RuntimeError:
+            # Qt can emit a final selection signal while tearing down the
+            # graphics scene during application exit.
+            return
         logger.debug('Currently selected items: %s',
-                     len(self.scene.selectedItems(user_only=True)))
+                     len(selected_items))
         self.actiongroup_set_enabled('active_when_selection',
-                                     self.scene.has_selection())
+                                     bool(selected_items))
         self.actiongroup_set_enabled('active_when_single_image',
-                                     self.scene.has_single_image_selection())
+                                     len(selected_items) == 1
+                                     and selected_items[0].is_image)
 
-        if self.scene.has_selection():
-            item = self.scene.selectedItems(user_only=True)[0]
+        if selected_items:
+            item = selected_items[0]
             grayscale = getattr(item, 'grayscale', False)
-            actions.actions['grayscale'].qaction.setChecked(grayscale)
+            self._syncing_actions = True
+            try:
+                actions.actions['grayscale'].qaction.setChecked(grayscale)
+            finally:
+                self._syncing_actions = False
         self.viewport().repaint()
 
     def on_cursor_changed(self, cursor):
@@ -923,36 +1253,40 @@ class BeeGraphicsView(MainControlsMixin,
         else:
             super().tabletEvent(event)
 
+    def event(self, event):
+        # Claim draw-mode shortcuts before the global QAction shortcuts.
+        if (event.type() == QtCore.QEvent.Type.ShortcutOverride
+                and getattr(self, 'active_mode', None) == self.DRAW_MODE
+                and event.key() in (
+                    Qt.Key.Key_D, Qt.Key.Key_L, Qt.Key.Key_R, Qt.Key.Key_C,
+                    Qt.Key.Key_E, Qt.Key.Key_T, Qt.Key.Key_1, Qt.Key.Key_2,
+                    Qt.Key.Key_3, Qt.Key.Key_BracketLeft,
+                    Qt.Key.Key_BracketRight)):
+            event.accept()
+            return True
+        return super().event(event)
+
     def mousePressEvent(self, event):
         if self.active_mode == self.DRAW_MODE:
-            if event.button() == Qt.MouseButton.RightButton:
-                self._suppress_context_menu = True
-                self.exit_draw_mode(commit=True)
+            modifiers = event.modifiers()
+            if (event.button() == Qt.MouseButton.MiddleButton
+                    or (event.button() == Qt.MouseButton.LeftButton
+                        and modifiers
+                        & Qt.KeyboardModifier.AltModifier)):
+                self._draw_panning = True
+                self.event_start = event.position()
+                self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
                 event.accept()
                 return
             if event.button() == Qt.MouseButton.LeftButton:
                 scene_pos = self.mapToScene(event.pos())
-                if not self.draw_item:
-                    self.draw_item = BeePathItem()
-                    self.draw_item.setPos(scene_pos)
-                    self.scene.addItem(self.draw_item)
-                    self.draw_item.bring_to_front()
-                local_pos = self.draw_item.mapFromScene(scene_pos)
-                self.draw_current_stroke = {
-                    'color': list(self.draw_brush_color),
-                    'base_size': self.draw_brush_size,
-                    'points': [{
-                        'x': round(local_pos.x(), 1),
-                        'y': round(local_pos.y(), 1),
-                        'pressure': self._tablet_pressure,
-                    }],
-                }
-                self.draw_item.temp_stroke = self.draw_current_stroke
-                self.draw_item.update()
+                if self.draw_tool == 'eraser':
+                    self._begin_eraser(scene_pos)
+                else:
+                    self._begin_mark(scene_pos)
                 event.accept()
                 return
-            event.accept()
-            return
+            return super().mousePressEvent(event)
 
         if self.mousePressEventMainControls(event):
             return
@@ -968,7 +1302,7 @@ class BeeGraphicsView(MainControlsMixin,
                     self.scene.internal_clipboard = []
                     msg = f'Copied color to clipboard: {name}'
                     logger.debug(msg)
-                    widgets.BeeNotification(self, msg)
+                    self.show_feedback(msg, '◉', 'sample_color')
                 else:
                     logger.debug('No color found')
             self.cancel_sample_color_mode()
@@ -999,16 +1333,47 @@ class BeeGraphicsView(MainControlsMixin,
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self.active_mode == self.DRAW_MODE and self._draw_panning:
+            self.reset_previous_transform()
+            pos = event.position()
+            self.pan(self.event_start - pos)
+            self.event_start = pos
+            event.accept()
+            return
+
+        if (self.active_mode == self.DRAW_MODE
+                and self.draw_tool == 'eraser'
+                and event.buttons() & Qt.MouseButton.LeftButton):
+            self._begin_eraser(self.mapToScene(event.pos()))
+            event.accept()
+            return
+
         if (self.active_mode == self.DRAW_MODE
                 and self.draw_current_stroke is not None):
             scene_pos = self.mapToScene(event.pos())
             local_pos = self.draw_item.mapFromScene(scene_pos)
-            self.draw_current_stroke['points'].append({
-                'x': round(local_pos.x(), 1),
-                'y': round(local_pos.y(), 1),
+            start = BeePathItem._point(
+                self.draw_current_stroke['points'][0])
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                local_pos = self._constrained_point(
+                    start, local_pos, self.draw_tool)
+            point = {
+                'x': round(local_pos.x(), 2),
+                'y': round(local_pos.y(), 2),
                 'pressure': self._tablet_pressure,
-            })
+            }
             self.draw_item.prepareGeometryChange()
+            points = self.draw_current_stroke['points']
+            if self.draw_tool == 'pen' and not (
+                    event.modifiers()
+                    & Qt.KeyboardModifier.ShiftModifier):
+                previous = BeePathItem._point(points[-1])
+                if (local_pos - previous).manhattanLength() >= 0.25:
+                    points.append(point)
+            elif len(points) == 1:
+                points.append(point)
+            else:
+                points[-1] = point
             self.draw_item.temp_stroke = self.draw_current_stroke
             self.draw_item.update()
             event.accept()
@@ -1045,6 +1410,11 @@ class BeeGraphicsView(MainControlsMixin,
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if self.active_mode == self.DRAW_MODE and self._draw_panning:
+            self._draw_panning = False
+            self.set_draw_tool(self.draw_tool)
+            event.accept()
+            return
         if (self.active_mode == self.DRAW_MODE
                 and self.draw_current_stroke is not None):
             self.draw_item.add_stroke(self.draw_current_stroke)
@@ -1072,11 +1442,56 @@ class BeeGraphicsView(MainControlsMixin,
         super().resizeEvent(event)
         self.recalc_scene_rect()
         self.welcome_overlay.resize(self.size())
+        if hasattr(self, 'draw_toolbar'):
+            self._position_draw_toolbar()
+        if hasattr(self, 'window_chrome'):
+            self.window_chrome.reposition()
+        if getattr(self, '_hud_toast', None) is not None:
+            self._hud_toast.reposition()
 
     def keyPressEvent(self, event):
         if self.keyPressEventMainControls(event):
             return
         if self.active_mode == self.DRAW_MODE:
+            modifiers = event.modifiers()
+            if (event.key() == Qt.Key.Key_D
+                    and modifiers & Qt.KeyboardModifier.ControlModifier):
+                self.exit_draw_mode(commit=True)
+                event.accept()
+                return
+            if (event.key() == Qt.Key.Key_T
+                    and modifiers & Qt.KeyboardModifier.ControlModifier):
+                self.on_action_set_brush_color()
+                event.accept()
+                return
+            tool_keys = {
+                Qt.Key.Key_D: 'pen',
+                Qt.Key.Key_L: 'line',
+                Qt.Key.Key_R: 'rectangle',
+                Qt.Key.Key_C: 'ellipse',
+                Qt.Key.Key_E: 'eraser',
+            }
+            style_keys = {
+                Qt.Key.Key_1: 'solid',
+                Qt.Key.Key_2: 'dotted',
+                Qt.Key.Key_3: 'arrow',
+            }
+            if (modifiers == Qt.KeyboardModifier.NoModifier
+                    and event.key() in tool_keys):
+                self.set_draw_tool(tool_keys[event.key()])
+                event.accept()
+                return
+            if (modifiers == Qt.KeyboardModifier.NoModifier
+                    and event.key() in style_keys):
+                self.set_draw_style(style_keys[event.key()])
+                event.accept()
+                return
+            if event.key() in (Qt.Key.Key_BracketLeft,
+                               Qt.Key.Key_BracketRight):
+                delta = -1 if event.key() == Qt.Key.Key_BracketLeft else 1
+                self.draw_toolbar.set_width(self.draw_brush_size + delta)
+                event.accept()
+                return
             if event.key() == Qt.Key.Key_Escape:
                 self.exit_draw_mode(commit=True)
                 event.accept()

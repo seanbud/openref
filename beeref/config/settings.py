@@ -73,23 +73,23 @@ class CommandlineArgs:
     deliberately enabled from the main() function while ignored for
     other imports so that unit tests won't fail.
 
-    This is a singleton so that arguments are only parsed once, unless
-    ``with_check`` is ``True``.
+    This is a singleton. Library imports parse safe defaults once; the main
+    entry point reparses the real process arguments with ``with_check=True``.
     """
 
     _instance = None
 
     def __new__(cls, *args, **kwargs):
-        if not cls._instance or kwargs.get('with_check'):
+        if not cls._instance:
             cls._instance = super().__new__(cls)
         return cls._instance
 
     def __init__(self, with_check=False):
-        if not hasattr(self, '_args'):
-            if with_check:
-                self._args = parser.parse_args()
-            else:
-                self._args = parser.parse_known_args()[0]
+        if with_check:
+            self._args = parser.parse_args()
+        elif not hasattr(self, '_args'):
+            # Library imports must not consume pytest, IDE, or host flags.
+            self._args = parser.parse_args([])
 
     def __getattribute__(self, name):
         if name == '_args':
@@ -101,6 +101,7 @@ class CommandlineArgs:
 class BeeSettingsEvents(QtCore.QObject):
     restore_defaults = QtCore.pyqtSignal()
     restore_keyboard_defaults = QtCore.pyqtSignal()
+    appearance_changed = QtCore.pyqtSignal()
 
 
 # We want to send and receive settings events globally, not per
@@ -136,6 +137,19 @@ class BeeSettings(QtCore.QSettings):
             'cast': int,
             'validate': lambda x: x >= 0,
             'post_save_callback': QtGui.QImageReader.setAllocationLimit,
+        },
+        'Appearance/theme': {
+            'default': 'midnight',
+            'validate': lambda x: x in ('midnight', 'graphite', 'light'),
+            'post_save_callback': (
+                lambda value: settings_events.appearance_changed.emit()),
+        },
+        'Appearance/drawing_toolbar_position': {
+            'default': 'bottom-right',
+            'validate': lambda x: x in (
+                'bottom-right', 'bottom-left', 'top-right', 'top-left'),
+            'post_save_callback': (
+                lambda value: settings_events.appearance_changed.emit()),
         }
     }
 

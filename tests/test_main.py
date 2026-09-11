@@ -10,10 +10,10 @@ from beeref.view import BeeGraphicsView
 @patch('PyQt6.QtWidgets.QWidget.show')
 def test_beeref_mainwindow_init(show_mock, qapp):
     window = BeeRefMainWindow(qapp)
-    assert window.windowTitle() == 'BeeRef'
+    assert window.windowTitle() == 'OpenRef'
     assert BeeAssets().logo == BeeAssets().logo
     assert window.windowIcon()
-    assert window.contentsMargins() == QtCore.QMargins(0, 0, 0, 0)
+    assert window.contentsMargins() == QtCore.QMargins(1, 1, 1, 1)
     assert isinstance(window.view, BeeGraphicsView)
     show_mock.assert_called()
 
@@ -30,7 +30,8 @@ def test_beerefapplication_fileopenevent(open_mock, qapp, main_window):
 @patch('beeref.__main__.BeeRefApplication')
 @patch('beeref.__main__.CommandlineArgs')
 @patch('beeref.config.BeeSettings.on_startup')
-def test_main(startup_mock, args_mock, app_mock, qapp):
+@patch('beeref.__main__.apply_theme')
+def test_main(theme_mock, startup_mock, args_mock, app_mock, qapp):
     app_mock.return_value = qapp
     args_mock.return_value.filename = None
     args_mock.return_value.loglevel = 'WARN'
@@ -42,3 +43,4 @@ def test_main(startup_mock, args_mock, app_mock, qapp):
 
     args_mock.assert_called_once_with(with_check=True)
     startup_mock.assert_called()
+    theme_mock.assert_called_once_with(qapp, 'midnight')

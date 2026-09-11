@@ -82,7 +82,10 @@ class MainControlsMixin:
         else:
             msg = 'Attempted drop not an image or image too big'
             logger.info(msg)
-            widgets.BeeNotification(self.control_target, msg)
+            if hasattr(self.control_target, 'show_feedback'):
+                self.control_target.show_feedback(msg, '!', duration=2400)
+            else:
+                widgets.BeeNotification(self.control_target, msg)
 
     def dragMoveEvent(self, event):
         event.acceptProposedAction()
