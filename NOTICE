@@ -1,0 +1,25 @@
+OpenRef licensing and attribution notice
+========================================
+
+OpenRef source code is free software licensed under the GNU General Public
+License, version 3 or (at your option) any later version. Official binaries
+include PyQt6 and are conveyed as a combined work under GNU GPL version 3 only.
+See LICENSE for the complete project license and warranty disclaimer.
+
+OpenRef modifications and original assets:
+Copyright © 2026 Sean Budning and OpenRef contributors.
+
+OpenRef is based on BeeRef:
+Copyright © 2021-2024 Rebecca Breu and BeeRef contributors.
+https://github.com/rbreu/beeref
+
+OpenRef is a modified version of BeeRef. OpenRef modifications began on
+2026-09-09. See CONTRIBUTORS.md for contributor and imported-work provenance.
+
+Contributor attribution is preserved in the source history and changelog.
+OpenRef is an independent project and is not affiliated with or endorsed by
+Idyllic Pixel AB or its products.
+
+OpenRef is distributed WITHOUT ANY WARRANTY; without even the implied warranty
+of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. Recipients may use,
+study, modify, and redistribute it under the applicable GPL terms.

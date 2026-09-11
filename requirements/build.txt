@@ -1,3 +1,4 @@
 # For the build action on github
 
 pyinstaller==6.6.0
+pyinstaller-hooks-contrib==2024.3

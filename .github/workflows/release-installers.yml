@@ -1,0 +1,223 @@
+name: release installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  corresponding-source:
+    name: Corresponding source
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+
+      - name: Build exact source bundle
+        run: |
+          python tools/build_source_bundle.py --revision "$GITHUB_SHA"
+          cd dist/source
+          sha256sum OpenRef-Corresponding-Source-*.tar.gz > OpenRef-Source-SHA256SUMS.txt
+
+      - name: Upload corresponding source
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenRef-Corresponding-Source
+          path: dist/source/*
+          if-no-files-found: error
+          retention-days: 14
+
+  macos-apple-silicon:
+    name: macOS Apple Silicon DMG
+    runs-on: macos-15
+    env:
+      OPENREF_TARGET_ARCH: arm64
+      HAS_APPLE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE != '' }}
+      MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+      MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Apple Silicon runner
+        run: test "$(uname -m)" = "arm64"
+
+      - name: Set up Python 3.11.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install pip==24.0
+          pip install -r requirements/build.txt
+          pip install -r requirements/runtime-release.txt
+          pip install -e . --no-deps
+
+      - name: Collect and verify licenses
+        run: |
+          python tools/collect_licenses.py
+          python tools/verify_release_compliance.py
+          python tools/write_build_provenance.py
+
+      - name: Record exact corresponding source
+        run: |
+          printf '\nExact source for this build:\n%s/tree/%s\n' \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA" \
+            >> SOURCE_CODE.txt
+
+      - name: Import Apple signing certificate
+        if: env.HAS_APPLE_CERTIFICATE == 'true'
+        env:
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import certificate.p12 -k build.keychain \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s \
+            -k "$KEYCHAIN_PASSWORD" build.keychain
+          echo "APPLE_CODESIGN_IDENTITY=$MACOS_CODESIGN_IDENTITY" \
+            >> "$GITHUB_ENV"
+
+      - name: Build arm64 application
+        run: |
+          pyinstaller --clean OpenRef.spec
+          file dist/OpenRef.app/Contents/MacOS/OpenRef-* | grep arm64
+
+      - name: Apply ad-hoc signature
+        if: env.HAS_APPLE_CERTIFICATE != 'true'
+        run: codesign --force --deep --sign - dist/OpenRef.app
+
+      - name: Create DMG
+        run: |
+          mkdir -p dist/dmg
+          cp -R dist/OpenRef.app dist/dmg/
+          cp LICENSE NOTICE SOURCE_CODE.txt THIRD_PARTY_NOTICES.md dist/dmg/
+          cp CONTRIBUTORS.md ASSET_PROVENANCE.md dist/dmg/
+          cp -R build/legal/third-party dist/dmg/THIRD_PARTY_LICENSES
+          cp build/legal/build-provenance.json dist/dmg/
+          ln -s /Applications dist/dmg/Applications
+          hdiutil create -volname OpenRef -srcfolder dist/dmg \
+            -ov -format UDZO dist/OpenRef-macOS-arm64.dmg
+          shasum -a 256 dist/OpenRef-macOS-arm64.dmg \
+            > dist/OpenRef-macOS-arm64-SHA256.txt
+
+      - name: Notarize signed DMG
+        if: >-
+          env.HAS_APPLE_CERTIFICATE == 'true' &&
+          env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != '' &&
+          env.APPLE_TEAM_ID != ''
+        run: |
+          xcrun notarytool submit dist/OpenRef-macOS-arm64.dmg \
+            --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple dist/OpenRef-macOS-arm64.dmg
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenRef-macOS-arm64
+          path: |
+            dist/OpenRef-macOS-arm64.dmg
+            dist/OpenRef-macOS-arm64-SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    name: Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11.9
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.9"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install pip==24.0
+          pip install -r requirements/build.txt
+          pip install -r requirements/runtime-release.txt
+          pip install -e . --no-deps
+
+      - name: Collect and verify licenses
+        run: |
+          python tools/collect_licenses.py
+          python tools/verify_release_compliance.py
+          python tools/write_build_provenance.py
+
+      - name: Record exact corresponding source
+        shell: pwsh
+        run: |
+          Add-Content SOURCE_CODE.txt "`nExact source for this build:"
+          Add-Content SOURCE_CODE.txt "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/tree/$env:GITHUB_SHA"
+
+      - name: Build application
+        run: pyinstaller --clean OpenRef.spec
+
+      - name: Resolve package version
+        id: version
+        shell: pwsh
+        run: |
+          $version = python -c "from beeref.constants import VERSION; print(VERSION.split('-')[0])"
+          "value=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          $executable = Get-ChildItem "dist\OpenRef-*.exe" | Select-Object -First 1
+          Copy-Item $executable.FullName "dist\OpenRef.exe"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ steps.version.outputs.value }}" "packaging\windows\OpenRef.iss"
+          $hash = Get-FileHash "dist\installer\OpenRef-Windows-Setup.exe" -Algorithm SHA256
+          "$($hash.Hash.ToLower())  OpenRef-Windows-Setup.exe" | Set-Content "dist\installer\OpenRef-Windows-SHA256.txt"
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenRef-Windows
+          path: |
+            dist/installer/OpenRef-Windows-Setup.exe
+            dist/installer/OpenRef-Windows-SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  publish-release:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [corresponding-source, macos-apple-silicon, windows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "OpenRef $GITHUB_REF_NAME" \
+            --notes "Installers are accompanied by the exact corresponding-source archive and checksums in this release. OpenRef source is GPL-3.0-or-later; official binaries include PyQt6 and are conveyed under GPL-3.0-only."

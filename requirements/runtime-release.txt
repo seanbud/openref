@@ -1,0 +1,8 @@
+# Exact runtime dependency set used by official OpenRef installers.
+exif==1.6.0
+lxml==5.1.0
+plum-py==0.8.7
+PyQt6==6.7.0
+PyQt6-Qt6==6.7.0
+PyQt6-sip==13.12.0
+rectangle-packer==2.0.2

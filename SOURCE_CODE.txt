@@ -1,0 +1,18 @@
+OpenRef corresponding source code
+=================================
+
+The complete application source code, build scripts, license notices, and
+modification history for OpenRef are available at:
+
+https://github.com/seanbud/openref
+
+Every official installer is accompanied in the same GitHub Release or Actions
+run by an OpenRef-Corresponding-Source archive. That archive contains the exact
+OpenRef revision, locked dependency versions, upstream source archives for the
+embedded Python/PyQt/Qt dependencies, build scripts, notices, and checksums.
+Use that same-build archive rather than a moving branch.
+
+OpenRef source is licensed under GNU GPL version 3 or later. Official binaries
+include PyQt6 and are conveyed under GNU GPL version 3 only. Recipients may
+copy, modify, and redistribute them under those terms. See LICENSE, NOTICE, and
+THIRD_PARTY_NOTICES.md.
