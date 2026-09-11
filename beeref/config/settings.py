@@ -64,6 +64,11 @@ parser.add_argument(
     '--debug-raise-error',
     default='',
     help='immediately exit with given error message')
+parser.add_argument(
+    '--smoke-test',
+    default=False,
+    action='store_true',
+    help=argparse.SUPPRESS)
 
 
 class CommandlineArgs:

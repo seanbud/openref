@@ -39,6 +39,12 @@ a = Analysis(
     datas=[
         (join('beeref', 'documentation'), join('beeref', 'documentation')),
         (join('beeref', 'assets', 'openref.png'), join('beeref', 'assets')),
+        (join('beeref', 'assets', 'cursor_rotate.png'),
+         join('beeref', 'assets')),
+        (join('beeref', 'assets', 'cursor_flip_h.png'),
+         join('beeref', 'assets')),
+        (join('beeref', 'assets', 'cursor_flip_v.png'),
+         join('beeref', 'assets')),
     ] + legal_datas,
     hiddenimports=[],
     hookspath=[],

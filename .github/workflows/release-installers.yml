@@ -102,6 +102,11 @@ jobs:
           pyinstaller --clean OpenRef.spec
           file dist/OpenRef.app/Contents/MacOS/OpenRef-* | grep arm64
 
+      - name: Smoke test packaged application
+        run: |
+          dist/OpenRef.app/Contents/MacOS/OpenRef-* \
+            --smoke-test --settings-dir "$RUNNER_TEMP/openref-smoke"
+
       - name: Apply ad-hoc signature
         if: env.HAS_APPLE_CERTIFICATE != 'true'
         run: codesign --force --deep --sign - dist/OpenRef.app
@@ -175,6 +180,15 @@ jobs:
 
       - name: Build application
         run: pyinstaller --clean OpenRef.spec
+
+      - name: Smoke test packaged application
+        shell: pwsh
+        run: |
+          $executable = Get-ChildItem "dist\OpenRef-*.exe" | Select-Object -First 1
+          $process = Start-Process $executable.FullName -Wait -PassThru -ArgumentList "--smoke-test", "--settings-dir", "$env:RUNNER_TEMP\openref-smoke"
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged OpenRef smoke test failed: $($process.ExitCode)"
+          }
 
       - name: Resolve package version
         id: version

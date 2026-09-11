@@ -75,7 +75,8 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
         event.accept()
 
     def __del__(self):
-        del self.view
+        if hasattr(self, 'view'):
+            del self.view
 
 
 def safe_timer(timeout, func, *args, **kwargs):
@@ -110,11 +111,11 @@ def main():
     logger.debug('System: %s', ' '.join(platform.uname()))
     logger.debug('Python: %s', platform.python_version())
     logger.debug('LD_LIBRARY_PATH: %s', os.environ.get('LD_LIBRARY_PATH'))
+    args = CommandlineArgs(with_check=True)  # Force checking
     settings = BeeSettings()
     logger.info(f'Using settings: {settings.fileName()}')
     logger.info(f'Logging to: {logfile_name()}')
     settings.on_startup()
-    args = CommandlineArgs(with_check=True)  # Force checking
     assert not args.debug_raise_error, args.debug_raise_error
 
     os.environ["QT_DEBUG_PLUGINS"] = "1"
@@ -128,6 +129,8 @@ def main():
     # Repeatedly run python-noop to give the interpreter time to
     # handle signals
     safe_timer(50, lambda: None)
+    if args.smoke_test is True:
+        QtCore.QTimer.singleShot(500, app.quit)
 
     app.exec()
     del bee
