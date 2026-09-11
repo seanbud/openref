@@ -1286,6 +1286,20 @@ def test_items_bounding_rect_when_no_items(view):
     assert rect == QtCore.QRectF(0, 0, 0, 0)
 
 
+def test_used_space_grows_but_only_shrinks_when_optimized(view, item):
+    view.scene.addItem(item)
+    initial = view.scene.expand_used_space()
+    item.setPos(1000, 800)
+    expanded = view.scene.expand_used_space()
+
+    assert expanded.contains(initial)
+    assert expanded.right() > initial.right()
+
+    view.scene.removeItem(item)
+    assert view.scene.expand_used_space() == expanded
+    assert view.scene.optimize_used_space().isEmpty()
+
+
 def test_get_selection_center(view):
     with patch('beeref.scene.BeeGraphicsScene.itemsBoundingRect',
                return_value=QtCore.QRectF(10, 20, 100, 60)):

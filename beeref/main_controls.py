@@ -41,6 +41,8 @@ class MainControlsMixin:
             self.control_target.on_context_menu)
         self.setAcceptDrops(True)
         self.movewin_active = False
+        self.right_window_drag_active = False
+        self.right_window_dragged = False
 
     def on_action_movewin_mode(self):
         if self.movewin_active:
@@ -120,6 +122,19 @@ class MainControlsMixin:
             event.accept()
             return True
 
+        target = self.control_target
+        fullscreen = bool(target.parent.isFullScreen())
+        locked = getattr(target, 'window_position_locked', False)
+        if (event.button() == Qt.MouseButton.RightButton
+                and not fullscreen and not locked):
+            self.right_window_drag_active = True
+            self.right_window_dragged = False
+            self.event_start = event.globalPosition()
+            self._right_window_origin = self.main_window.pos()
+            self.viewport_or_self.setCursor(Qt.CursorShape.SizeAllCursor)
+            event.accept()
+            return True
+
         action, inverted =\
             self.control_target.keyboard_settings.mouse_action_for_event(event)
         if action == 'movewindow':
@@ -128,6 +143,14 @@ class MainControlsMixin:
             return True
 
     def mouseMoveEventMainControls(self, event):
+        if self.right_window_drag_active:
+            current = event.globalPosition().toPoint()
+            delta = current - self.event_start.toPoint()
+            if delta.manhattanLength() >= 3:
+                self.right_window_dragged = True
+            self.main_window.move(self._right_window_origin + delta)
+            event.accept()
+            return True
         if self.movewin_active:
             pos = self.mapToGlobal(event.position())
             delta = pos - self.event_start
@@ -138,6 +161,18 @@ class MainControlsMixin:
             return True
 
     def mouseReleaseEventMainControls(self, event):
+        if self.right_window_drag_active:
+            was_dragged = self.right_window_dragged
+            self.right_window_drag_active = False
+            self.right_window_dragged = False
+            self.viewport_or_self.unsetCursor()
+            if not was_dragged:
+                point = event.position().toPoint()
+                if self is not self.control_target:
+                    point = self.mapTo(self.control_target, point)
+                self.control_target.on_context_menu(point)
+            event.accept()
+            return True
         if self.movewin_active:
             self.exit_movewin_mode()
             event.accept()

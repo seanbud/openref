@@ -64,6 +64,32 @@ def test_eraser_removes_intersecting_mark(qapp):
     assert item.erase_at(QtCore.QPointF(200, 200), 5) is False
 
 
+def test_eraser_preview_fades_without_mutating_until_commit(qapp):
+    item = BeePathItem([
+        mark('line', start=(0, 0), end=(40, 0)),
+        mark('line', start=(0, 40), end=(40, 40)),
+    ])
+    item._update_bounding_rect()
+    item.set_erase_preview({0})
+
+    assert item.erase_preview_indexes == {0}
+    assert len(item.strokes) == 2
+    assert item.erase_indexes({0}) is True
+    assert len(item.strokes) == 1
+    assert item.erase_preview_indexes == set()
+
+
+def test_freehand_path_uses_cubic_smoothing(qapp):
+    stroke = mark('pen')
+    stroke['points'].insert(1, {'x': 12, 'y': 18, 'pressure': 1.0})
+    stroke['points'].insert(2, {'x': 27, 'y': 12, 'pressure': 1.0})
+    path = BeePathItem()._stroke_path(stroke)
+
+    types = [
+        path.elementAt(index).type for index in range(path.elementCount())]
+    assert QtGui.QPainterPath.ElementType.CurveToElement in types
+
+
 def test_backward_compatible_freehand_data(qapp):
     old_stroke = {
         'color': [1, 2, 3, 255],

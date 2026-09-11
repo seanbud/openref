@@ -17,9 +17,13 @@ Highlights
 ----------
 
 * Arrange, scale, crop, rotate, flip, and annotate reference images.
-* Draw freehand marks, lines, arrows, rectangles, and ellipses.
-* Work through a compact canvas-first interface with keyboard shortcuts.
-* Choose an OpenRef theme and place drawing controls in any canvas corner.
+* Draw smooth freehand marks, lines, arrows, rectangles, and ellipses.
+* Navigate an effectively infinite, pointer-centered canvas with the mouse.
+* Use OpenRef's custom color studio and reversible erase previews.
+* Choose Midnight, Graphite, Sakura, or Soft Light and place drawing controls
+  in any canvas corner.
+* Keep an expanding visual workspace around content, then trim it explicitly
+  with Fit Canvas.
 * Save complete boards as portable ``.bee`` files.
 
 Install

@@ -322,7 +322,7 @@ actions = ActionList([
     ),
     Action(
         id='fit_scene',
-        text='&Fit Scene',
+        text='&Fit Canvas',
         shortcuts=['Ctrl+Space', '1'],
         callback='on_action_fit_scene',
     ),
@@ -419,6 +419,14 @@ actions = ActionList([
         text='Move &Window',
         shortcuts=['Ctrl+M'],
         callback='on_action_move_window',
+    ),
+    Action(
+        id='lock_window',
+        text='&Lock Window Position',
+        shortcuts=['Ctrl+Shift+L'],
+        checkable=True,
+        settings='Window/lock_position',
+        callback='on_action_lock_window',
     ),
     Action(
         id='fullscreen',

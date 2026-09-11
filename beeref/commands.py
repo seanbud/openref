@@ -347,6 +347,26 @@ class ChangeDrawing(QtGui.QUndoCommand):
         self.item.replace_strokes(self.old_strokes)
 
 
+class ChangeCanvasBounds(QtGui.QUndoCommand):
+    """Store an explicit Fit Canvas used-space adjustment."""
+
+    def __init__(self, scene, new_rect, old_rect):
+        super().__init__('Fit canvas')
+        self.scene = scene
+        self.new_rect = QtCore.QRectF(new_rect)
+        self.old_rect = QtCore.QRectF(old_rect)
+
+    def _set(self, rect):
+        self.scene.set_used_space_rect(rect)
+        self.scene.update()
+
+    def redo(self):
+        self._set(self.new_rect)
+
+    def undo(self):
+        self._set(self.old_rect)
+
+
 class ChangeOpacity(QtGui.QUndoCommand):
     """Change opacity on images."""
 

@@ -1162,7 +1162,7 @@ def test_pan(scroll_value_mock, view, item):
 @patch('PyQt6.QtWidgets.QScrollBar.setValue')
 def test_pan_when_no_items(scroll_value_mock, view):
     view.pan(QtCore.QPointF(5.0, 10.0))
-    scroll_value_mock.assert_not_called()
+    assert scroll_value_mock.call_count == 2
 
 
 @patch('beeref.view.BeeGraphicsView.reset_previous_transform')
@@ -1180,10 +1180,10 @@ def test_zoom_in(pan_mock, reset_mock, view, imgfilename3x3):
 @patch('beeref.view.BeeGraphicsView.pan')
 def test_zoom_in_max_zoom_size(pan_mock, reset_mock, view, imgfilename3x3):
     item = BeePixmapItem(QtGui.QImage(imgfilename3x3))
-    view.scale(10000000, 10000000)
+    view.scale(10000, 10000)
     view.scene.addItem(item)
     view.zoom(40, QtCore.QPointF(10.0, 10.0))
-    assert view.get_scale() == 10000000
+    assert view.get_scale() == 10000
     reset_mock.assert_not_called()
     pan_mock.assert_not_called()
 
@@ -1203,9 +1203,10 @@ def test_zoom_out(pan_mock, reset_mock, view, imgfilename3x3):
 @patch('beeref.view.BeeGraphicsView.reset_previous_transform')
 @patch('beeref.view.BeeGraphicsView.pan')
 def test_zoom_out_min_zoom_size(pan_mock, reset_mock, view, item):
+    view.scale(0.0001, 0.0001)
     view.scene.addItem(item)
     view.zoom(-40, QtCore.QPointF(10.0, 10.0))
-    assert view.get_scale() == 1
+    assert view.get_scale() == 0.0001
     reset_mock.assert_not_called()
     pan_mock.assert_not_called()
 
@@ -1214,9 +1215,9 @@ def test_zoom_out_min_zoom_size(pan_mock, reset_mock, view, item):
 @patch('beeref.view.BeeGraphicsView.pan')
 def test_no_items(pan_mock, reset_mock, view, item):
     view.zoom(40, QtCore.QPointF(10.0, 10.0))
-    assert view.get_scale() == 1
-    reset_mock.assert_not_called()
-    pan_mock.assert_not_called()
+    assert view.get_scale() == 1.04
+    reset_mock.assert_called_once_with()
+    pan_mock.assert_called_once()
 
 
 @patch('beeref.view.BeeGraphicsView.reset_previous_transform')
@@ -1479,6 +1480,50 @@ def test_mouse_press_unhandled(mouse_event_mock, view):
     assert view.active_mode is None
     mouse_event_mock.assert_called_once_with(event)
     event.accept.assert_not_called()
+
+
+@patch('PyQt6.QtWidgets.QWidget.move')
+def test_right_drag_moves_unlocked_window(move_mock, view):
+    view.window_position_locked = False
+    press = MagicMock()
+    press.button.return_value = Qt.MouseButton.RightButton
+    press.globalPosition.return_value = QtCore.QPointF(100, 100)
+    view.mousePressEvent(press)
+
+    move = MagicMock()
+    move.globalPosition.return_value = QtCore.QPointF(118, 112)
+    view.mouseMoveEvent(move)
+    release = MagicMock()
+    release.position.return_value = QtCore.QPointF(20, 20)
+    view.mouseReleaseEvent(release)
+
+    assert move_mock.called
+    assert view.right_window_drag_active is False
+
+
+@patch('beeref.view.BeeGraphicsView.pan')
+def test_right_drag_pans_canvas_in_fullscreen(pan_mock, view):
+    view.parent.isFullScreen = MagicMock(return_value=True)
+    press = MagicMock()
+    press.button.return_value = Qt.MouseButton.RightButton
+    press.position.return_value = QtCore.QPointF(50, 60)
+    view.mousePressEvent(press)
+
+    move = MagicMock()
+    move.position.return_value = QtCore.QPointF(40, 44)
+    view.mouseMoveEvent(move)
+    release = MagicMock()
+    view.mouseReleaseEvent(release)
+
+    pan_mock.assert_called_once_with(QtCore.QPointF(10, 16))
+    assert view._right_canvas_panning is False
+
+
+def test_lock_window_action_controls_right_drag(view):
+    view.on_action_lock_window(True)
+    assert view.window_position_locked is True
+    view.on_action_lock_window(False)
+    assert view.window_position_locked is False
 
 
 @patch('PyQt6.QtWidgets.QGraphicsView.mouseMoveEvent')

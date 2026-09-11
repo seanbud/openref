@@ -1,3 +1,5 @@
+from unittest.mock import patch
+
 from PyQt6 import QtCore
 
 from beeref.items import BeePathItem
@@ -73,3 +75,40 @@ def test_draw_feedback_reuses_toast(view):
     assert view._hud_toast is toast
     assert toast.label.text() == 'Dotted stroke'
     assert toast.shortcut.text() == '2'
+
+
+def test_eraser_gesture_previews_then_commits_as_one_undo(view):
+    strokes = [{
+        'tool': 'line', 'style': 'solid',
+        'color': [255, 255, 255, 255], 'base_size': 5,
+        'points': [{'x': 0, 'y': 0}, {'x': 50, 'y': 0}],
+    }, {
+        'tool': 'line', 'style': 'solid',
+        'color': [255, 255, 255, 255], 'base_size': 5,
+        'points': [{'x': 0, 'y': 50}, {'x': 50, 'y': 50}],
+    }]
+    item = BeePathItem(strokes)
+    item._update_bounding_rect()
+    view.scene.addItem(item)
+    view.enter_draw_mode()
+    view.set_draw_tool('eraser')
+
+    view._begin_eraser(QtCore.QPointF(20, 0), QtCore.QPointF(20, 0))
+    assert len(item.strokes) == 2
+    assert item.erase_preview_indexes == {0}
+
+    view._commit_eraser()
+    assert len(item.strokes) == 1
+    view.undo_stack.undo()
+    assert item.strokes == strokes
+
+
+@patch('beeref.view.sys.platform', 'darwin')
+def test_command_temporarily_switches_pen_to_eraser(qtbot, view):
+    view.enter_draw_mode()
+    view.set_draw_tool('pen')
+
+    qtbot.keyPress(view, QtCore.Qt.Key.Key_Meta)
+    assert view.draw_tool == 'eraser'
+    qtbot.keyRelease(view, QtCore.Qt.Key.Key_Meta)
+    assert view.draw_tool == 'pen'

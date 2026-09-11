@@ -31,7 +31,7 @@ import shutil
 import sqlite3
 import tempfile
 
-from PyQt6 import QtGui
+from PyQt6 import QtCore, QtGui
 
 from beeref import constants
 from beeref.items import BeePixmapItem, BeeErrorItem
@@ -189,6 +189,11 @@ class SQLiteIO:
 
     @handle_sqlite_errors
     def read(self):
+        canvas = self.fetchone(
+            'SELECT used_x, used_y, used_width, used_height '
+            'FROM canvas WHERE id=1')
+        if canvas and hasattr(self.scene, 'set_used_space_rect'):
+            self.scene.set_used_space_rect(QtCore.QRectF(*canvas))
         rows = self.fetchall(
             'SELECT items.id, type, x, y, z, scale, rotation, flip, '
             'items.data, sqlar.data '
@@ -261,6 +266,17 @@ class SQLiteIO:
                 self.write()
 
     def write_data(self):
+        if hasattr(self.scene, 'used_space_rect'):
+            rect = self.scene.used_space_rect
+            self.ex(
+                'INSERT INTO canvas '
+                '(id, used_x, used_y, used_width, used_height) '
+                'VALUES (1, ?, ?, ?, ?) '
+                'ON CONFLICT(id) DO UPDATE SET '
+                'used_x=excluded.used_x, used_y=excluded.used_y, '
+                'used_width=excluded.used_width, '
+                'used_height=excluded.used_height',
+                (rect.x(), rect.y(), rect.width(), rect.height()))
         to_delete = {row[0] for row in self.fetchall('SELECT id from ITEMS')}
         # We don't want to touch existing items that are displayed as errors:
         keep = {item.original_save_id

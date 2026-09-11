@@ -754,6 +754,7 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         self.is_image = False
         self.strokes = copy.deepcopy(strokes or [])
         self.temp_stroke = None
+        self.erase_preview_indexes = set()
         self._cached_rect = QtCore.QRectF(0, 0, 1, 1)
         self.init_selectable()
         logger.debug(f'Initialized {self}')
@@ -838,14 +839,18 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
             elif len(points) == 2:
                 path.lineTo(end)
             else:
-                # Quadratic mid-point smoothing removes the jagged feel of
-                # raw tablet/mouse events while preserving the final point.
-                for index in range(1, len(points) - 1):
-                    current = self._point(points[index])
-                    following = self._point(points[index + 1])
-                    midpoint = (current + following) / 2
-                    path.quadTo(current, midpoint)
-                path.lineTo(end)
+                # Catmull-Rom-to-Bezier interpolation keeps the curve passing
+                # through every sampled point without exposing mouse-event
+                # corners. Endpoints are duplicated to avoid edge kinks.
+                vectors = [self._point(point) for point in points]
+                for index in range(len(vectors) - 1):
+                    before = vectors[max(0, index - 1)]
+                    current = vectors[index]
+                    following = vectors[index + 1]
+                    after = vectors[min(len(vectors) - 1, index + 2)]
+                    control_1 = current + (following - before) / 6
+                    control_2 = following - (after - current) / 6
+                    path.cubicTo(control_1, control_2, following)
         return path
 
     def _arrow_path(self, stroke):
@@ -911,17 +916,11 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
 
         tool = stroke.get('tool', 'pen')
         if tool == 'pen' and any('pressure' in point for point in points):
-            # Pressure is rendered per segment. Mouse strokes simply use 1.0.
-            for previous, current in zip(points, points[1:]):
-                pressure = (previous.get('pressure', 1.0)
-                            + current.get('pressure', 1.0)) / 2
-                pen.setWidthF(max(0.5, base_size * pressure))
-                painter.setPen(pen)
-                painter.drawLine(self._point(previous), self._point(current))
-            if len(points) == 1:
-                painter.drawPoint(self._point(points[0]))
-        else:
-            painter.drawPath(self._stroke_path(stroke))
+            pressure = sum(
+                point.get('pressure', 1.0) for point in points) / len(points)
+            pen.setWidthF(max(0.5, base_size * pressure))
+            painter.setPen(pen)
+        painter.drawPath(self._stroke_path(stroke))
 
         arrow = self._arrow_path(stroke)
         if not arrow.isEmpty():
@@ -946,11 +945,23 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
 
     def erase_at(self, point, radius):
         indexes = self.stroke_indexes_at(point, radius)
+        return self.erase_indexes(indexes)
+
+    def set_erase_preview(self, indexes):
+        """Fade marks that will be removed when the erase drag ends."""
+
+        self.erase_preview_indexes = set(indexes)
+        self.update()
+
+    def erase_indexes(self, indexes):
+        indexes = sorted(set(indexes), reverse=True)
         if not indexes:
             return False
         self.prepareGeometryChange()
-        for index in reversed(indexes):
-            self.strokes.pop(index)
+        for index in indexes:
+            if 0 <= index < len(self.strokes):
+                self.strokes.pop(index)
+        self.erase_preview_indexes.clear()
         self._update_bounding_rect()
         self.update()
         return True
@@ -968,8 +979,12 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
 
     def paint(self, painter, option, widget):
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        for stroke in self.strokes:
+        for index, stroke in enumerate(self.strokes):
+            painter.save()
+            if index in self.erase_preview_indexes:
+                painter.setOpacity(0.16)
             self._paint_stroke(painter, stroke)
+            painter.restore()
         if self.temp_stroke:
             self._paint_stroke(painter, self.temp_stroke)
 

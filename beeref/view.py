@@ -19,6 +19,7 @@ import logging
 import math
 import os
 import os.path
+import sys
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
@@ -90,6 +91,12 @@ class BeeGraphicsView(MainControlsMixin,
         self._draw_original_strokes = None
         self._draw_panning = False
         self._tablet_pressure = 1.0
+        self._temporary_eraser_tool = None
+        self._eraser_candidates = {}
+        self._eraser_active = False
+        self._right_canvas_panning = False
+        self.window_position_locked = False
+        self._recalculating_scene_rect = False
 
         self.scene = BeeGraphicsScene(self.undo_stack)
         self.scene.changed.connect(self.on_scene_changed)
@@ -112,6 +119,9 @@ class BeeGraphicsView(MainControlsMixin,
         self.draw_toolbar.close_requested.connect(
             lambda: self.exit_draw_mode(commit=True))
         self.draw_toolbar.hide()
+        self.eraser_trail = widgets.modern_ui.EraserTrailOverlay(
+            self.viewport())
+        self.eraser_trail.stackUnder(self.draw_toolbar)
         pin_action = actions.actions['always_on_top'].qaction
         self.window_chrome = widgets.modern_ui.WindowChrome(
             self, parent,
@@ -208,6 +218,7 @@ class BeeGraphicsView(MainControlsMixin,
             self.welcome_overlay.clearFocus()
             self.welcome_overlay.hide()
             self.actiongroup_set_enabled('active_when_items_in_scene', True)
+            self.scene.expand_used_space()
         self.recalc_scene_rect()
 
     def on_can_redo_changed(self, can_redo):
@@ -302,8 +313,15 @@ class BeeGraphicsView(MainControlsMixin,
         if self.active_mode == self.DRAW_MODE:
             self.set_draw_style('solid')
             return
-        self.fit_rect(self.scene.itemsBoundingRect())
-        self.show_feedback('Canvas framed', '⌗', 'fit_scene')
+        old_rect = QtCore.QRectF(self.scene.used_space_rect)
+        rect = self.scene.optimized_used_space_rect()
+        if rect != old_rect:
+            self.undo_stack.push(commands.ChangeCanvasBounds(
+                self.scene, rect, old_rect))
+        if not rect.isNull() and not rect.isEmpty():
+            self.fit_rect(rect)
+        self.viewport().update()
+        self.show_feedback('Canvas fitted', '⌗', 'fit_scene')
 
     def on_action_fit_selection(self):
         self.fit_rect(self.scene.itemsBoundingRect(selection_only=True))
@@ -374,6 +392,13 @@ class BeeGraphicsView(MainControlsMixin,
             self.welcome_overlay.on_action_movewin_mode()
         self.show_feedback('Move window · drag anywhere', '✥',
                            'move_window', duration=2000)
+
+    def on_action_lock_window(self, checked):
+        self.window_position_locked = checked
+        self.show_feedback(
+            'Window position locked' if checked
+            else 'Window position unlocked',
+            '◆' if checked else '◇', 'lock_window')
 
     def on_action_undo(self):
         logger.debug('Undo: %s' % self.undo_stack.undoText())
@@ -576,6 +601,8 @@ class BeeGraphicsView(MainControlsMixin,
 
     def exit_draw_mode(self, commit=True):
         logger.debug(f'Exiting draw mode, commit={commit}')
+        self._clear_eraser_preview()
+        self._temporary_eraser_tool = None
         drawing_changed = False
         if self.draw_item:
             if self.draw_current_stroke:
@@ -705,6 +732,7 @@ class BeeGraphicsView(MainControlsMixin,
         apply_theme(
             self.app, self.settings.valueOrDefault('Appearance/theme'))
         self._position_draw_toolbar()
+        self.viewport().update()
 
     @staticmethod
     def _constrained_point(start, end, tool):
@@ -737,16 +765,73 @@ class BeeGraphicsView(MainControlsMixin,
                 if item.stroke_indexes_at(local, radius / item.scale()):
                     return item
 
-    def _begin_eraser(self, scene_pos):
-        if self.draw_item is None:
-            item = self._find_drawing_at(scene_pos, self.draw_brush_size)
-            if item is None:
-                return
-            self.draw_item = item
-            self._draw_editing_existing = True
-            self._draw_original_strokes = copy.deepcopy(item.strokes)
-        radius = self.draw_brush_size / max(self.draw_item.scale(), 0.001)
-        self.draw_item.erase_at(self.draw_item.mapFromScene(scene_pos), radius)
+    def _begin_eraser(self, scene_pos, view_pos=None):
+        """Begin a non-destructive erase preview."""
+
+        self._clear_eraser_preview()
+        self._eraser_active = True
+        view_pos = view_pos or self.mapFromScene(scene_pos)
+        self.eraser_trail.begin(view_pos, self.draw_brush_size)
+        self._preview_erase_at(scene_pos, view_pos)
+
+    def _preview_erase_at(self, scene_pos, view_pos=None):
+        if not self._eraser_active:
+            return
+        view_pos = view_pos or self.mapFromScene(scene_pos)
+        self.eraser_trail.add_point(view_pos)
+        scene_radius = self.draw_brush_size / max(self.get_scale(), 0.0001)
+        area = QtCore.QRectF(
+            scene_pos.x() - scene_radius,
+            scene_pos.y() - scene_radius,
+            scene_radius * 2, scene_radius * 2)
+        for item in self.scene.items(area):
+            if not isinstance(item, BeePathItem):
+                continue
+            local = item.mapFromScene(scene_pos)
+            local_radius = scene_radius / max(abs(item.scale()), 0.0001)
+            indexes = item.stroke_indexes_at(local, local_radius)
+            if not indexes:
+                continue
+            candidates = self._eraser_candidates.setdefault(item, set())
+            candidates.update(indexes)
+            item.set_erase_preview(candidates)
+
+    def _clear_eraser_preview(self):
+        for item in self._eraser_candidates:
+            item.set_erase_preview(())
+        self._eraser_candidates = {}
+        self._eraser_active = False
+        if hasattr(self, 'eraser_trail'):
+            self.eraser_trail.cancel()
+
+    def _commit_eraser(self):
+        candidates = self._eraser_candidates
+        self._eraser_candidates = {}
+        self._eraser_active = False
+        if not candidates:
+            self.eraser_trail.finish()
+            return
+        self.undo_stack.beginMacro('Erase drawing marks')
+        for item, indexes in candidates.items():
+            before = copy.deepcopy(item.strokes)
+            after = [
+                stroke for index, stroke in enumerate(before)
+                if index not in indexes
+            ]
+            item.set_erase_preview(())
+            if item is self.draw_item:
+                item.replace_strokes(after)
+                continue
+            if after:
+                item.replace_strokes(after)
+                self.undo_stack.push(commands.ChangeDrawing(
+                    item, after, before, ignore_first_redo=True))
+            else:
+                item.replace_strokes(before)
+                self.undo_stack.push(commands.DeleteItems(
+                    self.scene, [item]))
+        self.undo_stack.endMacro()
+        self.eraser_trail.finish()
 
     def _begin_mark(self, scene_pos):
         if self.draw_item is None:
@@ -1131,29 +1216,35 @@ class BeeGraphicsView(MainControlsMixin,
             self.viewport().unsetCursor()
 
     def recalc_scene_rect(self):
-        """Resize the scene rectangle so that it is always one view width
-        wider than all items' bounding box at each side and one view
-        width higher on top and bottom. This gives the impression of
-        an infinite canvas."""
+        """Keep several screens of navigable space around the viewport."""
 
-        if self.previous_transform:
+        if self.previous_transform or self._recalculating_scene_rect:
             return
         logger.trace('Recalculating scene rectangle...')
+        self._recalculating_scene_rect = True
         try:
-            topleft = self.mapFromScene(
-                self.scene.itemsBoundingRect().topLeft())
-            topleft = self.mapToScene(QtCore.QPoint(
-                topleft.x() - self.size().width(),
-                topleft.y() - self.size().height()))
-            bottomright = self.mapFromScene(
-                self.scene.itemsBoundingRect().bottomRight())
-            bottomright = self.mapToScene(QtCore.QPoint(
-                bottomright.x() + self.size().width(),
-                bottomright.y() + self.size().height()))
-            self.setSceneRect(QtCore.QRectF(topleft, bottomright))
+            visible = self.mapToScene(self.viewport().rect()).boundingRect()
+            canvas = QtCore.QRectF(self.scene.used_space_rect)
+            combined = visible if canvas.isEmpty() else visible.united(canvas)
+            margin_x = max(visible.width() * 4, 1000)
+            margin_y = max(visible.height() * 4, 1000)
+            self.setSceneRect(combined.marginsAdded(
+                QtCore.QMarginsF(margin_x, margin_y, margin_x, margin_y)))
         except OverflowError:
             logger.info('Maximum scene size reached')
+        finally:
+            self._recalculating_scene_rect = False
         logger.trace('Done recalculating scene rectangle')
+
+    def drawBackground(self, painter, rect):
+        from beeref.theme import canvas_colors
+
+        theme = self.settings.valueOrDefault('Appearance/theme')
+        dead_color, used_color = canvas_colors(theme)
+        painter.fillRect(rect, QtGui.QColor(dead_color))
+        used = self.scene.used_space_rect.intersected(rect)
+        if not used.isNull() and not used.isEmpty():
+            painter.fillRect(used, QtGui.QColor(used_color))
 
     def get_zoom_size(self, func):
         """Calculates the size of all items' bounding box in the view's
@@ -1183,20 +1274,13 @@ class BeeGraphicsView(MainControlsMixin,
         return self.transform().m11()
 
     def pan(self, delta):
-        if not self.scene.items():
-            logger.debug('No items in scene; ignore pan')
-            return
-
         hscroll = self.horizontalScrollBar()
         hscroll.setValue(int(hscroll.value() + delta.x()))
         vscroll = self.verticalScrollBar()
         vscroll.setValue(int(vscroll.value() + delta.y()))
+        self.recalc_scene_rect()
 
     def zoom(self, delta, anchor):
-        if not self.scene.items():
-            logger.debug('No items in scene; ignore zoom')
-            return
-
         # We calculate where the anchor is before and after the zoom
         # and then move the view accordingly to keep the anchor fixed
         # We can't use QGraphicsView's AnchorUnderMouse since it
@@ -1207,19 +1291,17 @@ class BeeGraphicsView(MainControlsMixin,
         ref_point = self.mapToScene(anchor)
         if delta == 0:
             return
-        factor = 1 + abs(delta / 1000)
-        if delta > 0:
-            if self.get_zoom_size(max) < 10000000:
-                self.scale(factor, factor)
-            else:
-                logger.debug('Maximum zoom size reached')
-                return
-        else:
-            if self.get_zoom_size(min) > 50:
-                self.scale(1/factor, 1/factor)
-            else:
-                logger.debug('Minimum zoom size reached')
-                return
+        step = 1 + abs(delta / 1000)
+        factor = step if delta > 0 else 1 / step
+        current = self.get_scale()
+        if ((delta > 0 and current >= 10000.0)
+                or (delta < 0 and current <= 0.0001)):
+            return
+        target = max(0.0001, min(10000.0, current * factor))
+        factor = target / current
+        if abs(factor - 1) < 1e-12:
+            return
+        self.scale(factor, factor)
 
         self.pan(self.mapFromScene(ref_point) - anchor)
         self.reset_previous_transform()
@@ -1261,12 +1343,24 @@ class BeeGraphicsView(MainControlsMixin,
                     Qt.Key.Key_D, Qt.Key.Key_L, Qt.Key.Key_R, Qt.Key.Key_C,
                     Qt.Key.Key_E, Qt.Key.Key_T, Qt.Key.Key_1, Qt.Key.Key_2,
                     Qt.Key.Key_3, Qt.Key.Key_BracketLeft,
-                    Qt.Key.Key_BracketRight)):
+                    Qt.Key.Key_BracketRight, Qt.Key.Key_Meta)):
             event.accept()
             return True
         return super().event(event)
 
     def mousePressEvent(self, event):
+        if (event.button() == Qt.MouseButton.RightButton
+                and self.parent.isFullScreen()):
+            self._right_canvas_panning = True
+            self.event_start = event.position()
+            self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+
+        if (event.button() == Qt.MouseButton.RightButton
+                and self.mousePressEventMainControls(event)):
+            return
+
         if self.active_mode == self.DRAW_MODE:
             modifiers = event.modifiers()
             if (event.button() == Qt.MouseButton.MiddleButton
@@ -1281,7 +1375,7 @@ class BeeGraphicsView(MainControlsMixin,
             if event.button() == Qt.MouseButton.LeftButton:
                 scene_pos = self.mapToScene(event.pos())
                 if self.draw_tool == 'eraser':
-                    self._begin_eraser(scene_pos)
+                    self._begin_eraser(scene_pos, event.position())
                 else:
                     self._begin_mark(scene_pos)
                 event.accept()
@@ -1333,6 +1427,14 @@ class BeeGraphicsView(MainControlsMixin,
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._right_canvas_panning:
+            self.reset_previous_transform()
+            pos = event.position()
+            self.pan(self.event_start - pos)
+            self.event_start = pos
+            event.accept()
+            return
+
         if self.active_mode == self.DRAW_MODE and self._draw_panning:
             self.reset_previous_transform()
             pos = event.position()
@@ -1344,7 +1446,8 @@ class BeeGraphicsView(MainControlsMixin,
         if (self.active_mode == self.DRAW_MODE
                 and self.draw_tool == 'eraser'
                 and event.buttons() & Qt.MouseButton.LeftButton):
-            self._begin_eraser(self.mapToScene(event.pos()))
+            self._preview_erase_at(
+                self.mapToScene(event.pos()), event.position())
             event.accept()
             return
 
@@ -1368,7 +1471,12 @@ class BeeGraphicsView(MainControlsMixin,
                     event.modifiers()
                     & Qt.KeyboardModifier.ShiftModifier):
                 previous = BeePathItem._point(points[-1])
-                if (local_pos - previous).manhattanLength() >= 0.25:
+                sample_distance = max(
+                    0.25,
+                    1.2 / max(self.get_scale() * self.draw_item.scale(),
+                              0.0001))
+                if ((local_pos - previous).manhattanLength()
+                        >= sample_distance):
                     points.append(point)
             elif len(points) == 1:
                 points.append(point)
@@ -1410,9 +1518,22 @@ class BeeGraphicsView(MainControlsMixin,
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if self._right_canvas_panning:
+            self._right_canvas_panning = False
+            self.viewport().unsetCursor()
+            if self.active_mode == self.DRAW_MODE:
+                self.set_draw_tool(self.draw_tool)
+            event.accept()
+            return
         if self.active_mode == self.DRAW_MODE and self._draw_panning:
             self._draw_panning = False
             self.set_draw_tool(self.draw_tool)
+            event.accept()
+            return
+        if (self.active_mode == self.DRAW_MODE
+                and self._eraser_active
+                and event.button() == Qt.MouseButton.LeftButton):
+            self._commit_eraser()
             event.accept()
             return
         if (self.active_mode == self.DRAW_MODE
@@ -1444,6 +1565,8 @@ class BeeGraphicsView(MainControlsMixin,
         self.welcome_overlay.resize(self.size())
         if hasattr(self, 'draw_toolbar'):
             self._position_draw_toolbar()
+        if hasattr(self, 'eraser_trail'):
+            self.eraser_trail.setGeometry(self.viewport().rect())
         if hasattr(self, 'window_chrome'):
             self.window_chrome.reposition()
         if getattr(self, '_hud_toast', None) is not None:
@@ -1454,6 +1577,14 @@ class BeeGraphicsView(MainControlsMixin,
             return
         if self.active_mode == self.DRAW_MODE:
             modifiers = event.modifiers()
+            if (sys.platform == 'darwin'
+                    and event.key() == Qt.Key.Key_Meta
+                    and not event.isAutoRepeat()
+                    and self.draw_tool == 'pen'):
+                self._temporary_eraser_tool = self.draw_tool
+                self.set_draw_tool('eraser')
+                event.accept()
+                return
             if (event.key() == Qt.Key.Key_D
                     and modifiers & Qt.KeyboardModifier.ControlModifier):
                 self.exit_draw_mode(commit=True)
@@ -1501,3 +1632,15 @@ class BeeGraphicsView(MainControlsMixin,
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event):
+        if (self.active_mode == self.DRAW_MODE
+                and self._temporary_eraser_tool is not None
+                and event.key() == Qt.Key.Key_Meta
+                and not event.isAutoRepeat()):
+            previous = self._temporary_eraser_tool
+            self._temporary_eraser_tool = None
+            self.set_draw_tool(previous)
+            event.accept()
+            return
+        super().keyReleaseEvent(event)

@@ -148,7 +148,7 @@ def test_sqliteio_create_schema_on_new_when_create_new(tmpfile):
     result = io.fetchone(
         'SELECT COUNT(*) FROM sqlite_master '
         'WHERE type="table" AND name NOT LIKE "sqlite_%"')
-    assert result[0] == 2
+    assert result[0] == 3
     scene_mock.clear_save_ids.assert_called_once()
 
 
@@ -181,10 +181,20 @@ def test_sqliteio_readonly_doesnt_allow_write(view, tmpfile):
 def test_sqliteio_write_calls_create_schema_on_new(tmpfile, view):
     io = SQLiteIO(tmpfile, view.scene, create_new=True)
     with patch.object(io, 'create_schema_on_new') as crmock:
-        with patch.object(io, 'fetchall'):
-            with patch.object(io, 'exmany'):
-                io.write()
-                crmock.assert_called_once()
+        with patch.object(io, 'write_data'):
+            io.write()
+            crmock.assert_called_once()
+
+
+def test_sqliteio_roundtrips_used_canvas_space(tmpfile, view):
+    expected = QtCore.QRectF(-20, -10, 800, 600)
+    view.scene.set_used_space_rect(expected)
+    SQLiteIO(tmpfile, view.scene, create_new=True).write()
+
+    loaded_scene = MagicMock()
+    loaded_scene.set_used_space_rect = MagicMock()
+    SQLiteIO(tmpfile, loaded_scene).read()
+    loaded_scene.set_used_space_rect.assert_called_once_with(expected)
 
 
 def test_sqliteio_write_calls_write_meta(tmpfile, view):

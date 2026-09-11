@@ -65,6 +65,7 @@ menu_structure = [
             'show_titlebar',
             MENU_SEPARATOR,
             'move_window',
+            'lock_window',
         ],
     },
     {

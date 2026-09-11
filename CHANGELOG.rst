@@ -17,9 +17,13 @@ Added
 * Purpose-built pen color picker, hover-revealed frameless window controls,
   and a three-way save/discard/cancel warning.
 * Live pen-color preview in the drawing dock while the color picker is open.
-* OpenRef Midnight, Graphite, and Soft Light themes, with configurable drawing
-  toolbar placement in any canvas corner.
+* OpenRef Midnight, Graphite, Sakura, and Soft Light themes, with configurable
+  drawing toolbar placement in any canvas corner.
 * In-app license, corresponding-source, and contributor-attribution screens.
+* A fully custom compact HSV/alpha color studio with live drawing-dock preview.
+* Persistent used-canvas bounds: content expands the brighter workspace while
+  Fit Canvas explicitly trims it back to current content.
+* Reversible eraser previews with a soft cursor trail and single-step undo.
 
 Changed
 -------
@@ -36,6 +40,12 @@ Changed
 * Added shortcuts for always-on-top, fullscreen, focusing the canvas or
   selection, and changing item depth.
 * Added GPLv3, exact-source, and attribution material to every installer.
+* Freehand marks now use smooth interpolated curves at every zoom level.
+* Mouse-wheel zoom is effectively unbounded and remains centered beneath the
+  pointer; fullscreen right-drag pans the canvas.
+* Windowed right-drag moves an unlocked window, with a persistent lock toggle.
+* Holding Command while drawing with the pen temporarily activates the eraser
+  on macOS and restores the pen on release.
 
 The drawing foundation was contributed by Cinderflame-Linear in PR #150.
 Performance work draws from PR #154 by Feihei, and command-line parsing from

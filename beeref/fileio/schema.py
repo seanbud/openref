@@ -1,4 +1,4 @@
-USER_VERSION = 2
+USER_VERSION = 3
 APPLICATION_ID = 2060242126
 
 
@@ -30,6 +30,15 @@ SCHEMA = [
              ON UPDATE NO ACTION
     )
     """,
+    """
+    CREATE TABLE canvas (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        used_x REAL,
+        used_y REAL,
+        used_width REAL,
+        used_height REAL
+    )
+    """,
 ]
 
 
@@ -37,5 +46,10 @@ MIGRATIONS = {
     2: [
         "ALTER TABLE items ADD COLUMN data JSON",
         "UPDATE items SET data = json_object('filename', filename)",
+    ],
+    3: [
+        "CREATE TABLE canvas ("
+        "id INTEGER PRIMARY KEY CHECK (id = 1), "
+        "used_x REAL, used_y REAL, used_width REAL, used_height REAL)",
     ],
 }

@@ -58,10 +58,44 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
     def clear(self):
         self._clear_ongoing = True
         super().clear()
+        self.used_space_rect = QtCore.QRectF()
         self.internal_clipboard = []
         self.rubberband_item = RubberbandItem()
         self.multi_select_item = MultiSelectItem()
         self._clear_ongoing = False
+
+    @staticmethod
+    def _padded_content_rect(rect):
+        if rect.isNull() or rect.isEmpty():
+            return QtCore.QRectF()
+        padding = max(64.0, min(rect.width(), rect.height()) * 0.06)
+        margins = QtCore.QMarginsF(padding, padding, padding, padding)
+        return rect.marginsAdded(margins)
+
+    def expand_used_space(self):
+        """Grow, but never shrink, the canvas area claimed by content."""
+
+        content = self._padded_content_rect(self.itemsBoundingRect())
+        if content.isNull() or content.isEmpty():
+            return self.used_space_rect
+        if self.used_space_rect.isNull() or self.used_space_rect.isEmpty():
+            self.used_space_rect = content
+        else:
+            self.used_space_rect = self.used_space_rect.united(content)
+        return QtCore.QRectF(self.used_space_rect)
+
+    def optimize_used_space(self):
+        """Refit used space to current content on explicit user request."""
+
+        self.used_space_rect = self._padded_content_rect(
+            self.itemsBoundingRect())
+        return QtCore.QRectF(self.used_space_rect)
+
+    def optimized_used_space_rect(self):
+        return self._padded_content_rect(self.itemsBoundingRect())
+
+    def set_used_space_rect(self, rect):
+        self.used_space_rect = QtCore.QRectF(rect)
 
     def addItem(self, item):
         logger.debug(f'Adding item {item}')
@@ -535,6 +569,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 and self.multi_select_item.active_mode is None):
             self.multi_select_item.fit_selection_area(
                 self.itemsBoundingRect(selection_only=True))
+        self.expand_used_space()
 
     def add_item_later(self, itemdata, selected=False):
         """Keep an item for adding later via ``add_queued_items``
