@@ -132,6 +132,13 @@ def test_theme_widget_saves_selection(settings, view):
     assert settings.valueOrDefault('Appearance/theme') == 'light'
 
 
+def test_theme_widget_offers_sakura(settings, view):
+    widget = ThemeWidget()
+    widget.set_value('sakura')
+    assert widget.buttons['sakura'].isChecked()
+    assert settings.valueOrDefault('Appearance/theme') == 'sakura'
+
+
 def test_toolbar_position_defaults_to_bottom_right(settings, view):
     widget = DrawingToolbarPositionWidget()
     assert widget.buttons['bottom-right'].isChecked()

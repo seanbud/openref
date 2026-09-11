@@ -195,6 +195,8 @@ class ThemeWidget(RadioGroup):
          'Deep blue-charcoal surfaces with a restrained cyan accent.'),
         ('graphite', 'Graphite',
          'Neutral low-chroma surfaces for color-critical work.'),
+        ('sakura', 'Sakura',
+         'Ink-dark plum surfaces with soft blossom accents.'),
         ('light', 'Soft Light',
          'A bright interface with a dark canvas and drawing dock.'),
     )

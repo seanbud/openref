@@ -106,6 +106,11 @@ def test_invalid_appearance_values_use_defaults(settings):
         'Appearance/drawing_toolbar_position') == 'bottom-right'
 
 
+def test_sakura_is_a_supported_theme(settings):
+    settings.setValue('Appearance/theme', 'sakura')
+    assert settings.valueOrDefault('Appearance/theme') == 'sakura'
+
+
 def test_settings_value_or_default_gets_overriden_value(settings):
     settings.setValue('Items/image_storage_format', 'png')
     assert settings.valueOrDefault('Items/image_storage_format') == 'png'

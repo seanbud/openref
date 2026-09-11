@@ -1,4 +1,4 @@
-from PyQt6 import QtGui, QtWidgets
+from PyQt6 import QtGui
 
 from beeref.widgets.modern_ui import (
     ColorPickerDialog,
@@ -8,14 +8,14 @@ from beeref.widgets.modern_ui import (
 from beeref.widgets.drawing_toolbar import DrawingToolbar
 
 
-def test_color_picker_uses_qt_dialog_with_alpha(qtbot, view):
+def test_color_picker_is_compact_custom_dialog_with_alpha(qtbot, view):
     dialog = ColorPickerDialog(QtGui.QColor(255, 218, 120, 128), view)
     qtbot.addWidget(dialog)
 
     assert dialog.currentColor().name().upper() == '#FFDA78'
     assert abs(dialog.currentColor().alphaF() - 0.5) < 0.01
-    assert dialog.testOption(
-        QtWidgets.QColorDialog.ColorDialogOption.ShowAlphaChannel)
+    assert dialog.objectName() == 'colorDialog'
+    assert dialog.field.minimumWidth() <= dialog.width()
 
 
 def test_color_picker_updates_toolbar_preview_live(qtbot, view):

@@ -85,6 +85,17 @@ QToolTip {
     background: #181818; border: none; border-radius: 5px;
     padding: 5px; font-size: 12px;
 }
+#colorDialog {
+    background: #202126; border: 1px solid #090a0c; border-radius: 14px;
+}
+#colorDialogHeader { font-size: 15px; font-weight: 600; }
+#colorPreview { border: 2px solid rgba(255, 255, 255, 90); }
+#colorValueLabel { color: #aeb1b9; font-size: 10px; }
+#colorSwatch {
+    background: transparent; border: 2px solid transparent;
+    border-radius: 8px;
+}
+#colorSwatch:checked { border-color: #ffffff; }
 #primaryButton, #dangerButton, #secondaryButton {
     min-width: 72px; min-height: 30px; border: none;
     border-radius: 5px; font-size: 13px; font-weight: 500;
@@ -152,6 +163,40 @@ THEME_STYLESHEETS = {
     'graphite': """
         /* Neutral, low-chroma workspace for color-critical reference work. */
     """,
+    'sakura': """
+        QWidget { color: #f5e9ef; }
+        QMenuBar, QMenu, QDialog, QMessageBox { background: #2a2029; }
+        QMenuBar::item:selected, QMenu::item:selected { background: #533845; }
+        QMenu::separator { background: #5d3d4c; }
+        #drawingToolbar {
+            background: rgba(42, 29, 39, 248);
+            border: 1px solid #090609;
+            border-radius: 12px;
+        }
+        #drawingToolbar QToolButton:hover, #drawPopover QToolButton:hover,
+        #windowChrome QToolButton:hover { background: #583744; }
+        #drawingToolbar QToolButton:checked, #drawPopover QToolButton:checked,
+        #windowChrome QToolButton:checked { background: #81485e; }
+        #windowChrome {
+            background: rgba(41, 27, 37, 250);
+            border-bottom: 1px solid #090609;
+        }
+        #dialogCard, #commandPalette, #colorDialog {
+            background: #2d222b;
+            border: 1px solid #100a0e;
+        }
+        #commandSearch, #colorHex, #colorOpacity, QLineEdit, QSpinBox,
+        QComboBox, QListView, QPlainTextEdit {
+            background: #20171f; border-color: #694657;
+        }
+        #commandList::item:selected { background: #80465c; }
+        #BeeNotification { background: rgba(45, 31, 42, 245); }
+        #notificationShortcut { background: #3a2632; border-color: #75495d; }
+        #primaryButton { background: #ce668c; }
+        #primaryButton:hover { background: #df789d; }
+        QPushButton { background: #4a313e; border-color: #70495b; }
+        QPushButton:hover { background: #5b3b4a; }
+    """,
     'light': """
         QWidget { color: #20252b; }
         QMenuBar, QMenu, QDialog, QMessageBox { background: #eceff2; }
@@ -194,8 +239,23 @@ def available_themes():
     return (
         ('midnight', 'OpenRef Midnight'),
         ('graphite', 'Graphite'),
+        ('sakura', 'Sakura'),
         ('light', 'Soft Light'),
     )
+
+
+CANVAS_COLORS = {
+    'midnight': ('#0b1015', '#121b23'),
+    'graphite': ('#121212', '#1a1a1a'),
+    'sakura': ('#151015', '#211820'),
+    'light': ('#d9dde0', '#edf0f2'),
+}
+
+
+def canvas_colors(theme):
+    """Return dead-space and used-space colors for a theme."""
+
+    return CANVAS_COLORS.get(theme, CANVAS_COLORS['midnight'])
 
 
 def apply_theme(app, theme='midnight'):
@@ -204,4 +264,5 @@ def apply_theme(app, theme='midnight'):
     theme = theme if theme in THEME_STYLESHEETS else 'midnight'
     app.setStyle('Fusion')
     app.setFont(QtGui.QFont('Helvetica', 13))
+    app.setProperty('openrefTheme', theme)
     app.setStyleSheet(BASE_STYLESHEET + THEME_STYLESHEETS[theme])
