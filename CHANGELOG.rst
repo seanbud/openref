@@ -17,9 +17,9 @@ Added
 * Purpose-built pen color picker, hover-revealed frameless window controls,
   and a three-way save/discard/cancel warning.
 * Live pen-color preview in the drawing dock while the color picker is open.
-* Seven original interface themes: OpenRef Midnight, Graphite, Sakura, Deep
-  Ocean, Forest, Warm Paper, and Soft Light, with configurable drawing toolbar
-  placement in any canvas corner.
+* Ten original interface themes: OpenRef Midnight, Graphite, Sakura, Sakura
+  Night, Deep Ocean, Forest, Citrus Dusk, Lavender Haze, Warm Paper, and Soft
+  Light, with configurable drawing toolbar placement around the canvas.
 * In-app license, corresponding-source, and contributor-attribution screens.
 * A fully custom compact HSV/alpha color studio with live drawing-dock preview.
 * Persistent used-canvas bounds: content expands the brighter workspace while
@@ -76,6 +76,9 @@ Fixed
 * Undo and redo now preserve an active drawing session, while the macOS
   Command modifier visibly highlights Eraser in the dock for as long as it is
   held—even when a dock control owns keyboard focus.
+* Sakura is now a brighter berry-and-blossom theme; its former restrained look
+  remains available as Sakura Night. Color-forward themes use extremely subtle
+  vector glows and botanical/geometric linework behind canvas content.
 
 The drawing foundation was contributed by Cinderflame-Linear in PR #150.
 Performance work draws from PR #154 by Feihei, and command-line parsing from

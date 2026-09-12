@@ -171,6 +171,41 @@ THEME_STYLESHEETS = {
         /* Neutral, low-chroma workspace for color-critical reference work. */
     """,
     'sakura': """
+        QWidget { color: #fff6f8; }
+        QMenuBar, QMenu, QDialog, QMessageBox { background: #713f55; }
+        QMenuBar::item:selected, QMenu::item:selected { background: #a95d7b; }
+        QMenu::separator { background: #bd718c; }
+        #drawingToolbar {
+            background: rgba(103, 52, 75, 248);
+            border: 1px solid #2d1420; border-radius: 12px;
+        }
+        #drawingToolbar QToolButton:hover, #drawPopover QToolButton:hover,
+        #windowChrome QToolButton:hover { background: #a75d7a; }
+        #drawingToolbar QToolButton:checked, #drawPopover QToolButton:checked,
+        #windowChrome QToolButton:checked { background: #d47b9c; }
+        #windowChrome {
+            background: rgba(104, 53, 76, 250);
+            border-bottom: 1px solid #321823;
+        }
+        #dialogCard, #commandPalette, #colorDialog {
+            background: #754159; border: 1px solid #351824;
+        }
+        #commandSearch, #colorHex, #colorOpacity, QLineEdit, QSpinBox,
+        QComboBox, QListView, QPlainTextEdit {
+            background: #543044; border-color: #c47a96;
+        }
+        #commandList::item:selected { background: #d07899; }
+        #BeeNotification { background: rgba(107, 55, 78, 245); }
+        #notificationShortcut { background: #532d40; border-color: #c87996; }
+        #primaryButton { background: #ed88aa; color: #351522; }
+        #primaryButton:hover { background: #f59bbc; }
+        #welcomeOverlay { background: #3a202d; }
+        #welcomeWordmark { color: #ffe9f0; }
+        #welcomeMessage, #welcomeHelp { color: #e6b5c7; }
+        QPushButton { background: #96556f; border-color: #c67994; }
+        QPushButton:hover { background: #aa627e; }
+    """,
+    'sakura-night': """
         QWidget { color: #f5e9ef; }
         QMenuBar, QMenu, QDialog, QMessageBox { background: #2a2029; }
         QMenuBar::item:selected, QMenu::item:selected { background: #533845; }
@@ -279,6 +314,68 @@ THEME_STYLESHEETS = {
         QPushButton { background: #3b4a36; border-color: #5b6b51; }
         QPushButton:hover { background: #485a41; }
     """,
+    'citrus': """
+        QWidget { color: #fff4de; }
+        QMenuBar, QMenu, QDialog, QMessageBox { background: #593b28; }
+        QMenuBar::item:selected, QMenu::item:selected { background: #875638; }
+        #drawingToolbar {
+            background: rgba(76, 48, 31, 248);
+            border: 1px solid #1a0e08; border-radius: 12px;
+        }
+        #drawingToolbar QToolButton:hover, #drawPopover QToolButton:hover,
+        #windowChrome QToolButton:hover { background: #8d5a39; }
+        #drawingToolbar QToolButton:checked, #drawPopover QToolButton:checked,
+        #windowChrome QToolButton:checked { background: #c87b3e; }
+        #windowChrome { background: rgba(79, 49, 31, 250); }
+        #dialogCard, #commandPalette, #colorDialog {
+            background: #62412c; border-color: #21120b;
+        }
+        #commandSearch, #colorHex, #colorOpacity, QLineEdit, QSpinBox,
+        QComboBox, QListView, QPlainTextEdit {
+            background: #432b1f; border-color: #aa7046;
+        }
+        #commandList::item:selected { background: #b86f38; }
+        #BeeNotification { background: rgba(84, 52, 33, 245); }
+        #notificationShortcut { background: #3f291e; border-color: #a76c43; }
+        #primaryButton { background: #e99a4c; color: #29150a; }
+        #primaryButton:hover { background: #f3ab61; }
+        #welcomeOverlay { background: #2b1d16; }
+        #welcomeWordmark { color: #ffe8bd; }
+        #welcomeMessage, #welcomeHelp { color: #cda986; }
+        QPushButton { background: #795035; border-color: #a56f48; }
+        QPushButton:hover { background: #8c5d3c; }
+    """,
+    'lavender': """
+        QWidget { color: #f5f0ff; }
+        QMenuBar, QMenu, QDialog, QMessageBox { background: #443b68; }
+        QMenuBar::item:selected, QMenu::item:selected { background: #65578e; }
+        #drawingToolbar {
+            background: rgba(55, 47, 88, 248);
+            border: 1px solid #151127; border-radius: 12px;
+        }
+        #drawingToolbar QToolButton:hover, #drawPopover QToolButton:hover,
+        #windowChrome QToolButton:hover { background: #665a92; }
+        #drawingToolbar QToolButton:checked, #drawPopover QToolButton:checked,
+        #windowChrome QToolButton:checked { background: #8b78c0; }
+        #windowChrome { background: rgba(57, 49, 88, 250); }
+        #dialogCard, #commandPalette, #colorDialog {
+            background: #49406e; border-color: #19142d;
+        }
+        #commandSearch, #colorHex, #colorOpacity, QLineEdit, QSpinBox,
+        QComboBox, QListView, QPlainTextEdit {
+            background: #342d54; border-color: #796ba3;
+        }
+        #commandList::item:selected { background: #806db1; }
+        #BeeNotification { background: rgba(61, 52, 94, 245); }
+        #notificationShortcut { background: #332b51; border-color: #7566a0; }
+        #primaryButton { background: #aa91df; color: #211932; }
+        #primaryButton:hover { background: #baa3eb; }
+        #welcomeOverlay { background: #25203b; }
+        #welcomeWordmark { color: #e8dcff; }
+        #welcomeMessage, #welcomeHelp { color: #b8add3; }
+        QPushButton { background: #5d507f; border-color: #8070a5; }
+        QPushButton:hover { background: #6d5e91; }
+    """,
     'paper': """
         QWidget { color: #302d29; }
         QMenuBar, QMenu, QDialog, QMessageBox { background: #eee8dc; }
@@ -367,8 +464,11 @@ def available_themes():
         ('midnight', 'OpenRef Midnight'),
         ('graphite', 'Graphite'),
         ('sakura', 'Sakura'),
+        ('sakura-night', 'Sakura Night'),
         ('ocean', 'Deep Ocean'),
         ('forest', 'Forest'),
+        ('citrus', 'Citrus Dusk'),
+        ('lavender', 'Lavender Haze'),
         ('paper', 'Warm Paper'),
         ('light', 'Soft Light'),
     )
@@ -377,11 +477,23 @@ def available_themes():
 CANVAS_COLORS = {
     'midnight': ('#0b1015', '#121b23'),
     'graphite': ('#121212', '#1a1a1a'),
-    'sakura': ('#151015', '#211820'),
+    'sakura': ('#3a202d', '#512b3b'),
+    'sakura-night': ('#151015', '#211820'),
     'ocean': ('#071317', '#0d2228'),
     'forest': ('#111711', '#1c251b'),
+    'citrus': ('#2b1d16', '#3d281b'),
+    'lavender': ('#25203b', '#332b4f'),
     'paper': ('#c8c0b4', '#e6dfd3'),
     'light': ('#d9dde0', '#edf0f2'),
+}
+
+
+CANVAS_DECORATIONS = {
+    'sakura': ('petals', '#f4a7bf'),
+    'ocean': ('waves', '#56c9d1'),
+    'forest': ('leaves', '#9fbd78'),
+    'citrus': ('rings', '#f1a85a'),
+    'lavender': ('ribbons', '#b59ce8'),
 }
 
 
@@ -389,6 +501,12 @@ def canvas_colors(theme):
     """Return dead-space and used-space colors for a theme."""
 
     return CANVAS_COLORS.get(theme, CANVAS_COLORS['midnight'])
+
+
+def canvas_decoration(theme):
+    """Return an optional low-contrast vector decoration specification."""
+
+    return CANVAS_DECORATIONS.get(theme)
 
 
 def apply_theme(app, theme='midnight'):

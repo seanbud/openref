@@ -163,8 +163,9 @@ class SelectableMixin(BaseItemMixin):
         factor sof the view and the item."""
 
         if self.scene():
-            scale = self.scene().views()[0].get_scale()
-            self._view_scale = scale
+            views = self.scene().views()
+            if views:
+                self._view_scale = views[0].get_scale()
 
         # It can happen that the item is already removed from
         # the scene but its boundingRect is still needed. Keep the

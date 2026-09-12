@@ -1279,7 +1279,7 @@ class BeeGraphicsView(MainControlsMixin,
         logger.trace('Done recalculating scene rectangle')
 
     def drawBackground(self, painter, rect):
-        from beeref.theme import canvas_colors
+        from beeref.theme import canvas_colors, canvas_decoration
 
         theme = self.settings.valueOrDefault('Appearance/theme')
         dead_color, used_color = canvas_colors(theme)
@@ -1287,6 +1287,98 @@ class BeeGraphicsView(MainControlsMixin,
         used = self.scene.used_space_rect.intersected(rect)
         if not used.isNull() and not used.isEmpty():
             painter.fillRect(used, QtGui.QColor(used_color))
+        decoration = canvas_decoration(theme)
+        if decoration:
+            self._draw_canvas_decoration(painter, *decoration)
+
+    def _draw_canvas_decoration(self, painter, kind, color_name):
+        """Paint quiet, screen-anchored artwork behind canvas content."""
+
+        painter.save()
+        painter.resetTransform()
+        viewport = QtCore.QRectF(self.viewport().rect())
+        width, height = viewport.width(), viewport.height()
+        accent = QtGui.QColor(color_name)
+
+        # A broad corner glow gives colorful themes depth without creating a
+        # focal point that competes with reference images.
+        center = QtCore.QPointF(width * 0.92, height * 0.08)
+        glow = QtGui.QRadialGradient(center, max(width, height) * 0.55)
+        inner = QtGui.QColor(accent)
+        inner.setAlpha(18)
+        outer = QtGui.QColor(accent)
+        outer.setAlpha(0)
+        glow.setColorAt(0, inner)
+        glow.setColorAt(1, outer)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(glow)
+        painter.drawRect(viewport)
+
+        line_color = QtGui.QColor(accent)
+        line_color.setAlpha(23)
+        pen = QtGui.QPen(line_color, 1.25)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        if kind == 'petals':
+            branch = QtGui.QPainterPath(QtCore.QPointF(width * 0.72, 0))
+            branch.cubicTo(width * 0.78, height * 0.08,
+                           width * 0.86, height * 0.11,
+                           width, height * 0.20)
+            painter.drawPath(branch)
+            petal_color = QtGui.QColor(accent)
+            petal_color.setAlpha(18)
+            painter.setBrush(petal_color)
+            for x, y, angle in ((.79, .07, -22), (.84, .105, 18),
+                                (.89, .125, -14), (.94, .165, 24)):
+                painter.save()
+                painter.translate(width * x, height * y)
+                painter.rotate(angle)
+                painter.drawEllipse(QtCore.QRectF(-7, -3, 14, 6))
+                painter.restore()
+        elif kind == 'waves':
+            for offset in (0.0, 16.0, 32.0):
+                wave = QtGui.QPainterPath(
+                    QtCore.QPointF(width * 0.68, height * 0.13 + offset))
+                wave.cubicTo(width * .76, height * .09 + offset,
+                             width * .82, height * .18 + offset,
+                             width * .90, height * .13 + offset)
+                wave.cubicTo(width * .94, height * .10 + offset,
+                             width * .97, height * .11 + offset,
+                             width, height * .14 + offset)
+                painter.drawPath(wave)
+        elif kind == 'leaves':
+            stem = QtGui.QPainterPath(
+                QtCore.QPointF(width * .83, height * .02))
+            stem.cubicTo(width * .86, height * .09,
+                         width * .91, height * .12,
+                         width * .98, height * .19)
+            painter.drawPath(stem)
+            for x, y, angle in ((.86, .08, 30), (.89, .105, -25),
+                                (.93, .145, 28), (.96, .17, -22)):
+                painter.save()
+                painter.translate(width * x, height * y)
+                painter.rotate(angle)
+                painter.drawEllipse(QtCore.QRectF(-8, -3, 16, 6))
+                painter.restore()
+        elif kind == 'rings':
+            ring_center = QtCore.QPointF(width * .93, height * .07)
+            for radius in (70, 105, 140):
+                painter.drawArc(
+                    QtCore.QRectF(ring_center.x() - radius,
+                                  ring_center.y() - radius,
+                                  radius * 2, radius * 2),
+                    185 * 16, 115 * 16)
+        elif kind == 'ribbons':
+            for offset in (0, 18):
+                ribbon = QtGui.QPainterPath(
+                    QtCore.QPointF(width * .70, height * .04 + offset))
+                ribbon.cubicTo(width * .80, height * .16 + offset,
+                               width * .89, height * -.01 + offset,
+                               width, height * .12 + offset)
+                painter.drawPath(ribbon)
+        painter.restore()
 
     def get_zoom_size(self, func):
         """Calculates the size of all items' bounding box in the view's

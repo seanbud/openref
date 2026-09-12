@@ -146,8 +146,8 @@ class BeeSettings(QtCore.QSettings):
         'Appearance/theme': {
             'default': 'midnight',
             'validate': lambda x: x in (
-                'midnight', 'graphite', 'sakura', 'ocean', 'forest',
-                'paper', 'light'),
+                'midnight', 'graphite', 'sakura', 'sakura-night',
+                'ocean', 'forest', 'citrus', 'lavender', 'paper', 'light'),
             'post_save_callback': (
                 lambda value: settings_events.appearance_changed.emit()),
         },

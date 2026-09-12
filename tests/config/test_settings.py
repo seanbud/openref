@@ -118,7 +118,8 @@ def test_all_toolbar_anchor_positions_are_supported(settings, position):
 
 
 @pytest.mark.parametrize(
-    'theme', ('sakura', 'ocean', 'forest', 'paper'))
+    'theme', ('sakura', 'sakura-night', 'ocean', 'forest', 'citrus',
+              'lavender', 'paper'))
 def test_additional_themes_are_supported(settings, theme):
     settings.setValue('Appearance/theme', theme)
     assert settings.valueOrDefault('Appearance/theme') == theme

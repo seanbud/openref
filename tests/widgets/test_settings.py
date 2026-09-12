@@ -135,7 +135,8 @@ def test_theme_widget_saves_selection(settings, view):
 
 
 @pytest.mark.parametrize(
-    'theme', ('sakura', 'ocean', 'forest', 'paper'))
+    'theme', ('sakura', 'sakura-night', 'ocean', 'forest', 'citrus',
+              'lavender', 'paper'))
 def test_theme_widget_offers_additional_themes(settings, view, theme):
     widget = ThemeWidget()
     widget.set_value(theme)
