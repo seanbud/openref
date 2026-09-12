@@ -73,6 +73,9 @@ Fixed
 * The drawing dock remains screen-anchored while zooming and now offers eight
   edge and corner placements through a compact anchor control.
 * Replaced the drawing dock's pen-nib mark with a simpler angled pencil icon.
+* Undo and redo now preserve an active drawing session, while the macOS
+  Command modifier visibly highlights Eraser in the dock for as long as it is
+  held—even when a dock control owns keyboard focus.
 
 The drawing foundation was contributed by Cinderflame-Linear in PR #150.
 Performance work draws from PR #154 by Feihei, and command-line parsing from

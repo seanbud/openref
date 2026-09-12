@@ -117,7 +117,6 @@ class BeeGraphicsView(MainControlsMixin,
         self.init_main_controls(main_window=parent)
         self.draw_toolbar = widgets.drawing_toolbar.DrawingToolbar(
             self.viewport())
-        self.viewport().installEventFilter(self)
         self.draw_toolbar.tool_changed.connect(self.set_draw_tool)
         self.draw_toolbar.style_changed.connect(self.set_draw_style)
         self.draw_toolbar.width_changed.connect(self.set_draw_width)
@@ -125,6 +124,9 @@ class BeeGraphicsView(MainControlsMixin,
             self.on_action_set_brush_color)
         self.draw_toolbar.close_requested.connect(
             lambda: self.exit_draw_mode(commit=True))
+        for control in (self.draw_toolbar,
+                        *self.draw_toolbar.findChildren(QtWidgets.QWidget)):
+            control.installEventFilter(self)
         self.draw_toolbar.hide()
         self.eraser_trail = widgets.modern_ui.EraserTrailOverlay(
             self.viewport())
@@ -432,7 +434,8 @@ class BeeGraphicsView(MainControlsMixin,
 
     def on_action_undo(self):
         logger.debug('Undo: %s' % self.undo_stack.undoText())
-        self.cancel_active_modes()
+        if self.active_mode != self.DRAW_MODE:
+            self.cancel_active_modes()
         label = self.undo_stack.undoText()
         self.undo_stack.undo()
         if label:
@@ -440,7 +443,8 @@ class BeeGraphicsView(MainControlsMixin,
 
     def on_action_redo(self):
         logger.debug('Redo: %s' % self.undo_stack.redoText())
-        self.cancel_active_modes()
+        if self.active_mode != self.DRAW_MODE:
+            self.cancel_active_modes()
         label = self.undo_stack.redoText()
         self.undo_stack.redo()
         if label:
@@ -1387,6 +1391,28 @@ class BeeGraphicsView(MainControlsMixin,
                 event.accept()
                 return True
         return super().viewportEvent(event)
+
+    def eventFilter(self, watched, event):
+        """Track macOS Command even when a drawing control has focus."""
+
+        if (sys.platform == 'darwin'
+                and event.type() in (QtCore.QEvent.Type.KeyPress,
+                                     QtCore.QEvent.Type.KeyRelease)
+                and event.key() in (Qt.Key.Key_Control, Qt.Key.Key_Meta)
+                and not event.isAutoRepeat()):
+            if (event.type() == QtCore.QEvent.Type.KeyPress
+                    and getattr(self, 'active_mode', None) == self.DRAW_MODE
+                    and self.draw_tool == 'pen'):
+                self._temporary_eraser_tool = 'pen'
+                self.set_draw_tool('eraser', announce=False)
+            elif (event.type() == QtCore.QEvent.Type.KeyRelease
+                    and getattr(self, 'active_mode', None) == self.DRAW_MODE
+                    and getattr(self, '_temporary_eraser_tool', None)
+                    is not None):
+                previous = self._temporary_eraser_tool
+                self._temporary_eraser_tool = None
+                self.set_draw_tool(previous, announce=False)
+        return super().eventFilter(watched, event)
 
     def tabletEvent(self, event):
         if self.active_mode == self.DRAW_MODE:

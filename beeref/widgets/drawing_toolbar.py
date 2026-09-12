@@ -355,7 +355,9 @@ class DrawingToolbar(QtWidgets.QFrame):
         self.tool_popover.selected.connect(self._select_tool)
         self.width_popover.selected.connect(self._select_width)
         self.style_popover.selected.connect(self._select_style)
-        self.tool_buttons = self.tool_popover.buttons
+        # Keep the public lookup separate from the popover's exclusive group;
+        # otherwise syncing the remembered pen tool unchecks the dock eraser.
+        self.tool_buttons = dict(self.tool_popover.buttons)
         self.tool_buttons['eraser'] = self.eraser_button
 
         self.set_color(QtGui.QColor('#f5d66f'))

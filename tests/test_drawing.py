@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from PyQt6 import QtCore
+from PyQt6 import QtCore, QtGui
 
 from beeref.items import BeePathItem
 from beeref.view import BeeGraphicsView
@@ -137,5 +137,44 @@ def test_command_temporarily_switches_pen_to_eraser(qtbot, view):
 
     qtbot.keyPress(view, QtCore.Qt.Key.Key_Meta)
     assert view.draw_tool == 'eraser'
+    assert view.draw_toolbar.eraser_button.isChecked()
+    assert not view.draw_toolbar.tool_button.isChecked()
     qtbot.keyRelease(view, QtCore.Qt.Key.Key_Meta)
     assert view.draw_tool == 'pen'
+    assert not view.draw_toolbar.eraser_button.isChecked()
+    assert view.draw_toolbar.tool_button.isChecked()
+
+
+def test_undo_completed_stroke_stays_in_draw_mode(view):
+    view.enter_draw_mode()
+    view._begin_mark(QtCore.QPointF(10, 10))
+    view.draw_current_stroke['points'].append({
+        'x': 40, 'y': 20, 'pressure': 1.0})
+    release = MagicMock()
+    release.button.return_value = QtCore.Qt.MouseButton.LeftButton
+    view.mouseReleaseEvent(release)
+
+    view.on_action_undo()
+
+    assert view.active_mode == BeeGraphicsView.DRAW_MODE
+    assert view.draw_toolbar.isVisible()
+    assert not any(isinstance(item, BeePathItem)
+                   for item in view.scene.items())
+
+
+@patch('beeref.view.sys.platform', 'darwin')
+def test_command_modifier_updates_toolbar_from_child_focus(view):
+    view.enter_draw_mode()
+    press = QtGui.QKeyEvent(
+        QtCore.QEvent.Type.KeyPress, QtCore.Qt.Key.Key_Control,
+        QtCore.Qt.KeyboardModifier.ControlModifier)
+    release = QtGui.QKeyEvent(
+        QtCore.QEvent.Type.KeyRelease, QtCore.Qt.Key.Key_Control,
+        QtCore.Qt.KeyboardModifier.NoModifier)
+
+    view.eventFilter(view.draw_toolbar.color_button, press)
+    assert view.draw_tool == 'eraser'
+    assert view.draw_toolbar.eraser_button.isChecked()
+    view.eventFilter(view.draw_toolbar.color_button, release)
+    assert view.draw_tool == 'pen'
+    assert view.draw_toolbar.tool_button.isChecked()
