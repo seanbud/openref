@@ -1407,6 +1407,13 @@ class BeeGraphicsView(MainControlsMixin,
     def get_scale(self):
         return self.transform().m11()
 
+    def scrollContentsBy(self, dx, dy):
+        """Scroll only scene content; keep canvas controls in screen space."""
+
+        super().scrollContentsBy(dx, dy)
+        if hasattr(self, 'draw_toolbar'):
+            self._position_draw_toolbar()
+
     def pan(self, delta):
         hscroll = self.horizontalScrollBar()
         hscroll.setValue(int(hscroll.value() + delta.x()))

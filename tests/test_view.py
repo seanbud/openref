@@ -1175,6 +1175,23 @@ def test_pan_when_no_items(scroll_value_mock, view):
     assert scroll_value_mock.call_count == 2
 
 
+def test_drawing_toolbar_remains_screen_anchored_during_scroll(view, qtbot):
+    view.resize(720, 480)
+    view.setSceneRect(-5000, -5000, 10000, 10000)
+    view.enter_draw_mode()
+    view._position_draw_toolbar()
+    qtbot.wait(1)
+    anchored = QtCore.QPoint(view.draw_toolbar.pos())
+
+    view.horizontalScrollBar().setValue(
+        view.horizontalScrollBar().value() + 240)
+    view.verticalScrollBar().setValue(
+        view.verticalScrollBar().value() + 180)
+    qtbot.wait(1)
+
+    assert view.draw_toolbar.pos() == anchored
+
+
 @patch('beeref.view.BeeGraphicsView.reset_previous_transform')
 @patch('beeref.view.BeeGraphicsView.pan')
 def test_zoom_in(pan_mock, reset_mock, view, imgfilename3x3):

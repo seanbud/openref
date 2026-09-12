@@ -79,6 +79,8 @@ Fixed
 * Sakura is now a brighter berry-and-blossom theme; its former restrained look
   remains available as Sakura Night. Color-forward themes use extremely subtle
   vector glows and botanical/geometric linework behind canvas content.
+* Canvas scrolling now explicitly re-anchors the drawing dock after Qt moves
+  scene content, keeping the controls fixed in screen space during every pan.
 
 The drawing foundation was contributed by Cinderflame-Linear in PR #150.
 Performance work draws from PR #154 by Feihei, and command-line parsing from
