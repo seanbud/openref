@@ -96,6 +96,13 @@ QToolTip {
     border-radius: 8px;
 }
 #colorSwatch:checked { border-color: #ffffff; }
+#pinColor {
+    background: #303239; border: 1px solid #4a4d56; border-radius: 7px;
+    color: #f6d365; font-size: 17px;
+}
+#pinColor:hover, #pinColor:checked { background: #444751; }
+#colorStackLabel { color: #aeb1b9; font-size: 10px; min-width: 40px; }
+#emptyColorStack { color: #70737b; font-size: 10px; font-style: italic; }
 #primaryButton, #dangerButton, #secondaryButton {
     min-width: 72px; min-height: 30px; border: none;
     border-radius: 5px; font-size: 13px; font-weight: 500;

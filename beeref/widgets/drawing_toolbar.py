@@ -46,24 +46,28 @@ class CanvasToolButton(QtWidgets.QToolButton):
         kind = self.icon_kind
 
         if kind == 'pen':
-            painter.save()
-            painter.translate(20, 19)
-            painter.rotate(42)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(color)
-            painter.drawRoundedRect(QtCore.QRectF(-4, -13, 8, 20), 2, 2)
-            painter.setBrush(QtGui.QColor('#aeb2b8'))
-            painter.drawRoundedRect(QtCore.QRectF(-4, -14, 8, 4), 1, 1)
-            tip = QtGui.QPainterPath()
-            tip.moveTo(-4, 7)
-            tip.lineTo(4, 7)
-            tip.lineTo(0, 14)
-            tip.closeSubpath()
+            pencil = QtGui.QPainterPath()
+            pencil.moveTo(9, 31)
+            pencil.lineTo(12, 23)
+            pencil.lineTo(25, 10)
+            pencil.quadTo(27, 8, 29, 10)
+            pencil.lineTo(31, 12)
+            pencil.quadTo(33, 14, 31, 16)
+            pencil.lineTo(18, 29)
+            pencil.closeSubpath()
+            painter.drawPath(pencil)
             painter.setBrush(self.accent)
-            painter.drawPath(tip)
-            painter.setBrush(QtGui.QColor('#ececee'))
-            painter.drawEllipse(QtCore.QPointF(0, 12.5), 1.2, 1.2)
-            painter.restore()
+            tip = QtGui.QPolygonF((
+                QtCore.QPointF(9, 31),
+                QtCore.QPointF(12, 23),
+                QtCore.QPointF(18, 29),
+            ))
+            painter.drawPolygon(tip)
+            painter.setPen(QtGui.QPen(QtGui.QColor('#24262b'), 1.4))
+            painter.drawLine(QtCore.QPointF(24, 12),
+                             QtCore.QPointF(29, 17))
         elif kind == 'line':
             painter.drawLine(QtCore.QPointF(10, 30),
                              QtCore.QPointF(30, 10))

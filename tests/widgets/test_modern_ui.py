@@ -34,6 +34,32 @@ def test_color_picker_updates_toolbar_preview_live(qtbot, view):
     assert toolbar.color_button.accent.name().upper() == '#3399FF'
 
 
+def test_color_picker_remembers_applied_colors(qtbot, view, settings):
+    dialog = ColorPickerDialog(QtGui.QColor('#3399FF'), view)
+    qtbot.addWidget(dialog)
+    dialog.accept()
+
+    reopened = ColorPickerDialog(QtGui.QColor('#FFFFFF'), view)
+    qtbot.addWidget(reopened)
+
+    assert reopened.recent_colors[0] == '#FF3399FF'
+
+
+def test_color_picker_can_pin_and_unpin_current_color(qtbot, view, settings):
+    dialog = ColorPickerDialog(QtGui.QColor('#F58AA8'), view)
+    qtbot.addWidget(dialog)
+
+    dialog.pin_button.setChecked(True)
+    assert dialog.pinned_colors == ['#FFF58AA8']
+    assert dialog.pin_button.text() == '★'
+
+    reopened = ColorPickerDialog(QtGui.QColor('#F58AA8'), view)
+    qtbot.addWidget(reopened)
+    assert reopened.pin_button.isChecked()
+    reopened.pin_button.setChecked(False)
+    assert reopened.pinned_colors == []
+
+
 def test_unsaved_dialog_exposes_three_clear_choices(qtbot, view):
     dialog = UnsavedChangesDialog('Unsaved work', view)
     qtbot.addWidget(dialog)

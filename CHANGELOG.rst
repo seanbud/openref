@@ -1,5 +1,5 @@
-0.4.0 - Unreleased
-==================
+0.4.0 beta 1
+============
 
 Added
 -----
@@ -81,6 +81,10 @@ Fixed
   vector glows and botanical/geometric linework behind canvas content.
 * Canvas scrolling now explicitly re-anchors the drawing dock after Qt moves
   scene content, keeping the controls fixed in screen space during every pan.
+* The color studio now keeps a persistent recent-color stack and a separate
+  favorites stack. Select any color and use the star to pin it, or right-click
+  a saved swatch to pin or unpin it.
+* Replaced the drawing toolbar pen mark with a cleaner, compact pencil glyph.
 
 The drawing foundation was contributed by Cinderflame-Linear in PR #150.
 Performance work draws from PR #154 by Feihei, and command-line parsing from

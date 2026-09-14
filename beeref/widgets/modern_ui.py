@@ -5,6 +5,8 @@
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+from beeref.config import BeeSettings
+
 
 Qt = QtCore.Qt
 
@@ -162,9 +164,12 @@ class ColorPickerDialog(QtWidgets.QDialog):
     color_changed = QtCore.pyqtSignal(QtGui.QColor)
 
     SWATCHES = (
-        '#f6d365', '#f58aa8', '#ea526f', '#fa704c',
-        '#5ac8a8', '#39a8e8', '#7776df', '#f4f1ea',
+        '#FFD166', '#FF789A', '#EF476F', '#F77F4A',
+        '#42D6A4', '#32B8E6', '#6C8CFF', '#B794F6',
     )
+    MAX_SAVED_COLORS = 8
+    RECENT_COLORS_KEY = 'Drawing/recent_colors'
+    PINNED_COLORS_KEY = 'Drawing/pinned_colors'
 
     def __init__(self, color, parent=None):
         super().__init__(parent)
@@ -182,6 +187,9 @@ class ColorPickerDialog(QtWidgets.QDialog):
         self._updating = False
         self._drag_origin = None
         self._window_origin = None
+        self.settings = BeeSettings()
+        self.recent_colors = self._load_colors(self.RECENT_COLORS_KEY)
+        self.pinned_colors = self._load_colors(self.PINNED_COLORS_KEY)
 
         title = QtWidgets.QLabel('Stroke color', self)
         title.setObjectName('colorDialogHeader')
@@ -216,27 +224,44 @@ class ColorPickerDialog(QtWidgets.QDialog):
         self.opacity.setRange(0, 100)
         self.opacity.setSuffix('%')
         self.opacity.valueChanged.connect(self._opacity_changed)
+        self.pin_button = QtWidgets.QToolButton(self)
+        self.pin_button.setObjectName('pinColor')
+        self.pin_button.setCheckable(True)
+        self.pin_button.setFixedSize(34, 34)
+        self.pin_button.setToolTip('Pin this color')
+        self.pin_button.toggled.connect(self._toggle_current_pin)
         values = QtWidgets.QHBoxLayout()
         values.setSpacing(8)
         values.addWidget(self.preview)
         values.addWidget(self.hex_edit, 1)
         values.addWidget(self.opacity)
+        values.addWidget(self.pin_button)
 
         swatches = QtWidgets.QHBoxLayout()
-        swatches.setSpacing(6)
+        swatches.setSpacing(5)
+        swatch_label = QtWidgets.QLabel('Palette', self)
+        swatch_label.setObjectName('colorStackLabel')
+        swatches.addWidget(swatch_label)
         self.swatch_buttons = []
         for value in self.SWATCHES:
             button = QtWidgets.QToolButton(self)
             button.setObjectName('colorSwatch')
             button.setCheckable(True)
-            button.setFixedSize(30, 30)
-            button.setStyleSheet(
-                f'QToolButton {{ background: {value}; }}')
-            button.clicked.connect(
-                lambda checked, choice=value: self.set_color(
-                    QtGui.QColor(choice)))
+            button.setFixedSize(26, 26)
+            self._configure_color_button(button, value, pinned=False)
             self.swatch_buttons.append(button)
             swatches.addWidget(button)
+
+        self.pinned_stack = QtWidgets.QWidget(self)
+        self.pinned_stack.setObjectName('pinnedColorStack')
+        self.pinned_layout = QtWidgets.QHBoxLayout(self.pinned_stack)
+        self.pinned_layout.setContentsMargins(0, 0, 0, 0)
+        self.pinned_layout.setSpacing(5)
+        self.recent_stack = QtWidgets.QWidget(self)
+        self.recent_stack.setObjectName('recentColorStack')
+        self.recent_layout = QtWidgets.QHBoxLayout(self.recent_stack)
+        self.recent_layout.setContentsMargins(0, 0, 0, 0)
+        self.recent_layout.setSpacing(5)
 
         cancel = QtWidgets.QPushButton('Cancel', self)
         cancel.setObjectName('secondaryButton')
@@ -258,9 +283,117 @@ class ColorPickerDialog(QtWidgets.QDialog):
         layout.addWidget(self.alpha)
         layout.addLayout(values)
         layout.addLayout(swatches)
+        layout.addWidget(self.pinned_stack)
+        layout.addWidget(self.recent_stack)
         layout.addSpacing(2)
         layout.addLayout(buttons)
+        self._refresh_saved_colors()
         self.set_color(color, emit=False)
+
+    @staticmethod
+    def _color_key(color):
+        return QtGui.QColor(color).name(
+            QtGui.QColor.NameFormat.HexArgb).upper()
+
+    def _load_colors(self, key):
+        values = self.settings.value(key, [], type=list) or []
+        colors = []
+        for value in values:
+            color = QtGui.QColor(value)
+            if color.isValid():
+                normalized = self._color_key(color)
+                if normalized not in colors:
+                    colors.append(normalized)
+        return colors[:self.MAX_SAVED_COLORS]
+
+    def _save_colors(self, key, values):
+        self.settings.setValue(key, values[:self.MAX_SAVED_COLORS])
+
+    def _configure_color_button(self, button, value, pinned):
+        button.setObjectName('colorSwatch')
+        button.setCheckable(True)
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setStyleSheet(
+            f'QToolButton {{ background: {value}; }}')
+        button.setToolTip(
+            f'{value} · click to use · right-click to '
+            f'{"unpin" if pinned else "pin"}')
+        button.clicked.connect(
+            lambda checked, choice=value: self.set_color(
+                QtGui.QColor(choice)))
+        button.setContextMenuPolicy(
+            Qt.ContextMenuPolicy.CustomContextMenu)
+        button.customContextMenuRequested.connect(
+            lambda point, choice=value: self._set_color_pinned(
+                choice, not pinned))
+
+    @staticmethod
+    def _clear_layout(layout):
+        while layout.count():
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _populate_saved_stack(self, layout, title, values, pinned):
+        self._clear_layout(layout)
+        label = QtWidgets.QLabel(title, self)
+        label.setObjectName('colorStackLabel')
+        layout.addWidget(label)
+        if not values:
+            empty = QtWidgets.QLabel('None yet', self)
+            empty.setObjectName('emptyColorStack')
+            layout.addWidget(empty)
+        for value in values:
+            button = QtWidgets.QToolButton(self)
+            button.setFixedSize(26, 26)
+            self._configure_color_button(button, value, pinned)
+            layout.addWidget(button)
+        layout.addStretch(1)
+
+    def _refresh_saved_colors(self):
+        self._populate_saved_stack(
+            self.pinned_layout, 'Pinned', self.pinned_colors, True)
+        self._populate_saved_stack(
+            self.recent_layout, 'Recent', self.recent_colors, False)
+
+    def _set_color_pinned(self, value, pinned):
+        value = self._color_key(value)
+        if pinned:
+            self.pinned_colors = [
+                value, *[item for item in self.pinned_colors
+                         if item != value]]
+        else:
+            self.pinned_colors = [
+                item for item in self.pinned_colors if item != value]
+        self.pinned_colors = self.pinned_colors[:self.MAX_SAVED_COLORS]
+        self._save_colors(self.PINNED_COLORS_KEY, self.pinned_colors)
+        self._refresh_saved_colors()
+        self._sync_pin_button()
+
+    def _toggle_current_pin(self, checked):
+        if self._updating:
+            return
+        self._set_color_pinned(self._color, checked)
+
+    def _sync_pin_button(self):
+        pinned = self._color_key(self._color) in self.pinned_colors
+        self.pin_button.blockSignals(True)
+        self.pin_button.setChecked(pinned)
+        self.pin_button.setText('★' if pinned else '☆')
+        self.pin_button.setToolTip(
+            'Unpin this color' if pinned else 'Pin this color')
+        self.pin_button.blockSignals(False)
+
+    def _remember_current_color(self):
+        value = self._color_key(self._color)
+        self.recent_colors = [
+            value, *[item for item in self.recent_colors if item != value]]
+        self.recent_colors = self.recent_colors[:self.MAX_SAVED_COLORS]
+        self._save_colors(self.RECENT_COLORS_KEY, self.recent_colors)
+
+    def accept(self):
+        self._remember_current_color()
+        super().accept()
 
     def eventFilter(self, watched, event):
         if watched.objectName() == 'colorDialogHeader':
@@ -340,7 +473,8 @@ class ColorPickerDialog(QtWidgets.QDialog):
             f'background: {color.name(QtGui.QColor.NameFormat.HexArgb)}; '
             'border-radius: 17px;')
         for button, swatch in zip(self.swatch_buttons, self.SWATCHES):
-            button.setChecked(color.name().lower() == swatch)
+            button.setChecked(color.name().upper() == swatch)
+        self._sync_pin_button()
         self._updating = False
         if emit:
             self.color_changed.emit(QtGui.QColor(color))
