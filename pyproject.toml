@@ -10,7 +10,7 @@ include = ["beeref*"]
 
 [project]
 name = "OpenRef"
-version = "0.4.0b1"
+version = "0.4.0b2"
 description = "A free, modern, canvas-first reference board"
 readme = "README.rst"
 license = {file = "LICENSE"}

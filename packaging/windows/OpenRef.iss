@@ -1,6 +1,9 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.4.0"
 #endif
+#ifndef MyAppVersionInfo
+  #define MyAppVersionInfo "0.4.0.0"
+#endif
 
 [Setup]
 AppId={{A7CAFC1D-1B75-4E15-A1B3-93EB476208A7}
@@ -23,7 +26,7 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\OpenRef.exe
-VersionInfoVersion={#MyAppVersion}.0
+VersionInfoVersion={#MyAppVersionInfo}
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

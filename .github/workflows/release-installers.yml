@@ -194,15 +194,17 @@ jobs:
         id: version
         shell: pwsh
         run: |
-          $version = python -c "from beeref.constants import VERSION; print(VERSION.split('-')[0])"
-          "value=$version" >> $env:GITHUB_OUTPUT
+          $displayVersion = python -c "from beeref.constants import VERSION; print(VERSION)"
+          $numericVersion = python -c "import re; from beeref.constants import VERSION; p=re.findall(r'\d+', VERSION)[:4]; print('.'.join((p + ['0'] * 4)[:4]))"
+          "display=$displayVersion" >> $env:GITHUB_OUTPUT
+          "numeric=$numericVersion" >> $env:GITHUB_OUTPUT
 
       - name: Build Windows installer
         shell: pwsh
         run: |
           $executable = Get-ChildItem "dist\OpenRef-*.exe" | Select-Object -First 1
           Copy-Item $executable.FullName "dist\OpenRef.exe"
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ steps.version.outputs.value }}" "packaging\windows\OpenRef.iss"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=${{ steps.version.outputs.display }}" "/DMyAppVersionInfo=${{ steps.version.outputs.numeric }}" "packaging\windows\OpenRef.iss"
           $hash = Get-FileHash "dist\installer\OpenRef-Windows-Setup.exe" -Algorithm SHA256
           "$($hash.Hash.ToLower())  OpenRef-Windows-Setup.exe" | Set-Content "dist\installer\OpenRef-Windows-SHA256.txt"
 
