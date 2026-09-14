@@ -232,7 +232,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
           gh release create "$GITHUB_REF_NAME" artifacts/* \
             --repo "$GITHUB_REPOSITORY" \
             --title "OpenRef $GITHUB_REF_NAME" \
+            "${prerelease[@]}" \
             --notes "Installers are accompanied by the exact corresponding-source archive and checksums in this release. OpenRef source is GPL-3.0-or-later; official binaries include PyQt6 and are conveyed under GPL-3.0-only."

@@ -6,7 +6,7 @@ The ``release installers`` GitHub Actions workflow builds:
 * an Apple Silicon ``OpenRef.app`` packaged as a DMG on an arm64 macOS runner;
 * a 64-bit Windows executable packaged with Inno Setup; and
 * a GitHub Release containing both installers when the workflow is triggered by
-  a version tag such as ``v0.4.0``.
+  a version tag such as ``v0.4.0-beta.1`` or ``v0.4.0``.
 
 The workflow can also be run manually from the Actions page. Manual runs upload
 the installers as workflow artifacts without creating a GitHub Release.
@@ -37,11 +37,11 @@ Creating a release
 After tests pass and the version has been updated, create and push a version
 tag::
 
-  git tag v0.4.0
-  git push origin v0.4.0
+  git tag v0.4.0-beta.1
+  git push origin v0.4.0-beta.1
 
 The workflow publishes the two installers only after both platform builds
-succeed.
+succeed. Tags containing a hyphen are published as prereleases.
 
 Compliance checklist
 --------------------
