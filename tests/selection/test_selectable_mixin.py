@@ -128,7 +128,7 @@ def test_paint_when_selected_single_selection(view, item):
     item.paint(painter, None, None)
     painter.drawPixmap.assert_called_once()
     painter.drawRect.assert_called_once()
-    assert painter.drawPoint.call_count == 4
+    assert painter.drawPoint.call_count == 8
 
 
 def test_paint_when_selected_multi_selection(view, item):
@@ -706,7 +706,7 @@ def test_hover_flip_event_top_edge(view, item):
     with patch.object(item, 'bounding_rect_unselected',
                       return_value=QtCore.QRectF(0, 0, 100, 80)):
         item.hoverMoveEvent(event)
-        assert view.viewport().cursor() == BeeAssets().cursor_flip_v
+        assert view.viewport().cursor().shape() == Qt.CursorShape.SizeVerCursor
 
 
 def test_hover_flip_event_bottom_edge(view, item):
@@ -717,7 +717,7 @@ def test_hover_flip_event_bottom_edge(view, item):
     with patch.object(item, 'bounding_rect_unselected',
                       return_value=QtCore.QRectF(0, 0, 100, 80)):
         item.hoverMoveEvent(event)
-        assert view.viewport().cursor() == BeeAssets().cursor_flip_v
+        assert view.viewport().cursor().shape() == Qt.CursorShape.SizeVerCursor
 
 
 def test_hover_flip_event_left_edge(view, item):
@@ -728,7 +728,7 @@ def test_hover_flip_event_left_edge(view, item):
     with patch.object(item, 'bounding_rect_unselected',
                       return_value=QtCore.QRectF(0, 0, 100, 80)):
         item.hoverMoveEvent(event)
-        assert view.viewport().cursor() == BeeAssets().cursor_flip_h
+        assert view.viewport().cursor().shape() == Qt.CursorShape.SizeHorCursor
 
 
 def test_hover_flip_event_right_edge(view, item):
@@ -739,7 +739,7 @@ def test_hover_flip_event_right_edge(view, item):
     with patch.object(item, 'bounding_rect_unselected',
                       return_value=QtCore.QRectF(0, 0, 100, 80)):
         item.hoverMoveEvent(event)
-        assert view.viewport().cursor() == BeeAssets().cursor_flip_h
+        assert view.viewport().cursor().shape() == Qt.CursorShape.SizeHorCursor
 
 
 def test_hover_flip_event_top_edge_rotated_90(view, item):
@@ -751,7 +751,7 @@ def test_hover_flip_event_top_edge_rotated_90(view, item):
     with patch.object(item, 'bounding_rect_unselected',
                       return_value=QtCore.QRectF(0, 0, 100, 80)):
         item.hoverMoveEvent(event)
-        assert view.viewport().cursor() == BeeAssets().cursor_flip_h
+        assert view.viewport().cursor().shape() == Qt.CursorShape.SizeHorCursor
 
 
 def test_hover_flip_event_left_edge_when_rotated_90(view, item):
@@ -763,7 +763,7 @@ def test_hover_flip_event_left_edge_when_rotated_90(view, item):
     with patch.object(item, 'bounding_rect_unselected',
                       return_value=QtCore.QRectF(0, 0, 100, 80)):
         item.hoverMoveEvent(event)
-        assert view.viewport().cursor() == BeeAssets().cursor_flip_v
+        assert view.viewport().cursor().shape() == Qt.CursorShape.SizeVerCursor
 
 
 def test_hover_move_event_not_in_handles(view, item):
@@ -854,7 +854,7 @@ def test_mouse_press_event_rotate(view, item):
     view.scene.addItem(item)
     item.setSelected(True)
     event = MagicMock()
-    event.pos.return_value = QtCore.QPointF(111, 91)
+    event.pos.return_value = QtCore.QPointF(116, 96)
     event.scenePos.return_value = QtCore.QPointF(66, 99)
     event.button.return_value = Qt.MouseButton.LeftButton
     with patch.object(item, 'bounding_rect_unselected',
@@ -867,24 +867,21 @@ def test_mouse_press_event_rotate(view, item):
             event.accept.assert_called_once_with()
 
 
-def test_mouse_press_event_flip(view, item):
+def test_mouse_press_event_edge_starts_proportional_resize(view, item):
     view.scene.addItem(item)
     item.setSelected(True)
     event = MagicMock()
     event.pos.return_value = QtCore.QPointF(0, 40)
+    event.scenePos.return_value = QtCore.QPointF(0, 40)
     event.button.return_value = Qt.MouseButton.LeftButton
     view.scene.undo_stack = MagicMock(push=MagicMock())
     with patch.object(item, 'bounding_rect_unselected',
                       return_value=QtCore.QRectF(0, 0, 100, 80)):
         with patch('PyQt6.QtWidgets.QGraphicsPixmapItem.mousePressEvent'):
             item.mousePressEvent(event)
-    args = view.scene.undo_stack.push.call_args_list[0][0]
-    cmd = args[0]
-    isinstance(cmd, commands.FlipItems)
-    assert cmd.items == [item]
-    assert cmd.anchor == QtCore.QPointF(50, 40)
-    assert cmd.vertical is False
-    assert item.active_mode == item.FLIP_MODE
+    view.scene.undo_stack.push.assert_not_called()
+    assert item.active_mode == item.SCALE_MODE
+    assert item.event_anchor == QtCore.QPointF(100, 40)
     event.accept.assert_called_once_with()
 
 

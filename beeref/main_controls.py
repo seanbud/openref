@@ -160,11 +160,30 @@ class MainControlsMixin:
                 if self._right_restore_on_drag:
                     from beeref.actions import actions
 
+                    target = self.control_target
+                    cursor_global = current
+                    canvas_point = target.mapToScene(
+                        target.viewport().mapFromGlobal(cursor_global))
                     fullscreen_action = actions.actions['fullscreen'].qaction
-                    if fullscreen_action and fullscreen_action.isChecked():
-                        fullscreen_action.setChecked(False)
-                    else:
-                        self.control_target.parent.showNormal()
+                    target._fullscreen_drag_restore = True
+                    try:
+                        if (fullscreen_action
+                                and fullscreen_action.isChecked()):
+                            fullscreen_action.setChecked(False)
+                        else:
+                            target.parent.showNormal()
+                    finally:
+                        target._fullscreen_drag_restore = False
+                    target._fullscreen_anchor = (canvas_point,
+                                                 cursor_global)
+                    target._fullscreen_anchor_timer.start(450)
+                    centered = cursor_global - self.main_window.rect().center()
+                    self.main_window.move(centered)
+                    target._restore_global_canvas_anchor(
+                        canvas_point, cursor_global)
+                    QtCore.QTimer.singleShot(
+                        0, lambda: target._restore_global_canvas_anchor(
+                            canvas_point, cursor_global))
                     self._right_restore_on_drag = False
                     self.right_window_drag_active = True
                     self._right_window_origin = self.main_window.pos()

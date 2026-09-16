@@ -50,6 +50,8 @@ menu_structure = [
             MENU_SEPARATOR,
             'raise_to_top',
             'lower_to_bottom',
+            'move_forward',
+            'move_backward',
         ],
     },
     {
@@ -100,6 +102,11 @@ menu_structure = [
     {
         'menu': '&Arrange',
         'items': [
+            'raise_to_top',
+            'lower_to_bottom',
+            'move_forward',
+            'move_backward',
+            MENU_SEPARATOR,
             'arrange_optimal',
             'arrange_horizontal',
             'arrange_vertical',

@@ -84,7 +84,13 @@ class BeeGraphicsView(MainControlsMixin,
         self.draw_item = None
         self.draw_current_stroke = None
         self.draw_brush_size = 8.0
-        self.draw_brush_color = [235, 235, 238, 255]
+        stored_color = QtGui.QColor(self.settings.value(
+            'Drawing/default_color', '#EBEBEE'))
+        if not stored_color.isValid():
+            stored_color = QtGui.QColor('#EBEBEE')
+        self.draw_brush_color = [
+            stored_color.red(), stored_color.green(),
+            stored_color.blue(), stored_color.alpha()]
         self.draw_tool = 'pen'
         self.draw_style = 'solid'
         self._draw_editing_existing = False
@@ -183,7 +189,27 @@ class BeeGraphicsView(MainControlsMixin,
         self.update_window_title()
         if value:
             self.settings.update_recent_files(value)
+            self._remember_file_directory(value)
             self.update_menu_and_actions()
+
+    def _dialog_directory(self):
+        """Start file dialogs where the user last chose a file."""
+
+        recent = self.settings.value('Files/last_directory', '')
+        if recent and os.path.isdir(recent):
+            return recent
+        if self.filename:
+            directory = os.path.dirname(os.path.abspath(self.filename))
+            if os.path.isdir(directory):
+                return directory
+        documents = QtCore.QStandardPaths.writableLocation(
+            QtCore.QStandardPaths.StandardLocation.DocumentsLocation)
+        return documents if documents and os.path.isdir(documents) else ''
+
+    def _remember_file_directory(self, filename):
+        directory = os.path.dirname(os.path.abspath(filename))
+        if os.path.isdir(directory):
+            self.settings.setValue('Files/last_directory', directory)
 
     def cancel_active_modes(self):
         self.scene.cancel_active_modes()
@@ -342,6 +368,9 @@ class BeeGraphicsView(MainControlsMixin,
         self.show_feedback('Selection framed', '⌗', 'fit_selection')
 
     def on_action_fullscreen(self, checked):
+        if getattr(self, '_fullscreen_drag_restore', False):
+            self.parent.showNormal()
+            return
         anchor_view = self.viewport().rect().center()
         anchor_scene = self.mapToScene(anchor_view)
         anchor_global = self.viewport().mapToGlobal(anchor_view)
@@ -487,6 +516,14 @@ class BeeGraphicsView(MainControlsMixin,
         self.scene.lower_to_bottom()
         self.show_feedback('Sent selection to back', '↓',
                            'lower_to_bottom')
+
+    def on_action_move_forward(self):
+        self.scene.move_selection_one_layer(forward=True)
+        self.show_feedback('Moved selection forward', '↑', 'move_forward')
+
+    def on_action_move_backward(self):
+        self.scene.move_selection_one_layer(forward=False)
+        self.show_feedback('Moved selection backward', '↓', 'move_backward')
 
     def on_action_normalize_height(self):
         self.scene.normalize_height()
@@ -720,6 +757,9 @@ class BeeGraphicsView(MainControlsMixin,
             color = dialog.selectedColor()
             self.draw_brush_color = [
                 color.red(), color.green(), color.blue(), color.alpha()]
+            self.settings.setValue(
+                'Drawing/default_color',
+                color.name(QtGui.QColor.NameFormat.HexArgb))
             self.draw_toolbar.set_color(color)
             self.show_feedback(
                 f'Stroke color {color.name().upper()}', '●',
@@ -767,6 +807,7 @@ class BeeGraphicsView(MainControlsMixin,
         self.draw_toolbar.move(x, y)
         if self.draw_toolbar.isVisible():
             self.draw_toolbar.raise_()
+            self.draw_toolbar.reposition_popovers()
 
     def on_appearance_changed(self):
         from beeref.theme import apply_theme
@@ -888,7 +929,7 @@ class BeeGraphicsView(MainControlsMixin,
             'tool': self.draw_tool,
             'style': self.draw_style,
             'color': list(self.draw_brush_color),
-            'base_size': self.draw_brush_size,
+            'base_size': self.draw_brush_size / max(self.get_scale(), 0.0001),
             'points': [point],
         }
         self.draw_item.prepareGeometryChange()
@@ -942,9 +983,11 @@ class BeeGraphicsView(MainControlsMixin,
         filename, f = QtWidgets.QFileDialog.getOpenFileName(
             parent=self,
             caption='Open file',
+            directory=self._dialog_directory(),
             filter=f'{constants.APPNAME} File (*.bee)')
         if filename:
             filename = os.path.normpath(filename)
+            self._remember_file_directory(filename)
             self.open_from_file(filename)
             self.filename = filename
 
@@ -973,13 +1016,13 @@ class BeeGraphicsView(MainControlsMixin,
 
     def on_action_save_as(self):
         self.cancel_active_modes()
-        directory = os.path.dirname(self.filename) if self.filename else None
         filename, f = QtWidgets.QFileDialog.getSaveFileName(
             parent=self,
             caption='Save file',
-            directory=directory,
+            directory=self._dialog_directory(),
             filter=f'{constants.APPNAME} File (*.bee)')
         if filename:
+            self._remember_file_directory(filename)
             self.do_save(filename, create_new=True)
 
     def on_action_save(self):
@@ -990,11 +1033,10 @@ class BeeGraphicsView(MainControlsMixin,
             self.do_save(self.filename, create_new=False)
 
     def on_action_export_scene(self):
-        directory = os.path.dirname(self.filename) if self.filename else None
         filename, formatstr = QtWidgets.QFileDialog.getSaveFileName(
             parent=self,
             caption='Export Scene to Image',
-            directory=directory,
+            directory=self._dialog_directory(),
             filter=';;'.join(('Image Files (*.png *.jpg *.jpeg *.svg)',
                               'PNG (*.png)',
                               'JPEG (*.jpg *.jpeg)',
@@ -1002,6 +1044,7 @@ class BeeGraphicsView(MainControlsMixin,
 
         if not filename:
             return
+        self._remember_file_directory(filename)
 
         name, ext = os.path.splitext(filename)
         if not ext:
@@ -1143,14 +1186,13 @@ class BeeGraphicsView(MainControlsMixin,
         filenames, f = QtWidgets.QFileDialog.getOpenFileNames(
             parent=self,
             caption='Select one or more images to open',
+            directory=self._dialog_directory(),
             filter=f'Images ({formats})')
+        if filenames:
+            self._remember_file_directory(filenames[0])
         self.do_insert_images(filenames)
 
     def on_action_insert_text(self):
-        # Keep the color picker available while draw mode owns focus.
-        if self.active_mode == self.DRAW_MODE:
-            self.on_action_set_brush_color()
-            return
         self.cancel_active_modes()
         item = BeeTextItem()
         pos = self.mapToScene(self.mapFromGlobal(self.cursor().pos()))
@@ -1492,12 +1534,12 @@ class BeeGraphicsView(MainControlsMixin,
         return super().viewportEvent(event)
 
     def eventFilter(self, watched, event):
-        """Track macOS Command even when a drawing control has focus."""
+        """Track the configured eraser modifier across drawing controls."""
 
-        if (sys.platform == 'darwin'
-                and event.type() in (QtCore.QEvent.Type.KeyPress,
-                                     QtCore.QEvent.Type.KeyRelease)
-                and event.key() in (Qt.Key.Key_Control, Qt.Key.Key_Meta)
+        if (event.type() in (QtCore.QEvent.Type.KeyPress,
+                             QtCore.QEvent.Type.KeyRelease)
+                and event.key()
+                == self.keyboard_settings.temporary_eraser_key
                 and not event.isAutoRepeat()):
             if (event.type() == QtCore.QEvent.Type.KeyPress
                     and getattr(self, 'active_mode', None) == self.DRAW_MODE
@@ -1525,12 +1567,17 @@ class BeeGraphicsView(MainControlsMixin,
         # Claim draw-mode shortcuts before the global QAction shortcuts.
         if (event.type() == QtCore.QEvent.Type.ShortcutOverride
                 and getattr(self, 'active_mode', None) == self.DRAW_MODE
-                and event.key() in (
+                and (event.key() in (
                     Qt.Key.Key_D, Qt.Key.Key_L, Qt.Key.Key_R, Qt.Key.Key_C,
-                    Qt.Key.Key_E, Qt.Key.Key_T, Qt.Key.Key_1, Qt.Key.Key_2,
+                    Qt.Key.Key_E, Qt.Key.Key_T,
+                    Qt.Key.Key_1, Qt.Key.Key_2,
                     Qt.Key.Key_3, Qt.Key.Key_BracketLeft,
                     Qt.Key.Key_BracketRight, Qt.Key.Key_Meta,
-                    Qt.Key.Key_Control)):
+                    Qt.Key.Key_Control,
+                    self.keyboard_settings.temporary_eraser_key)
+                    or (event.key() == Qt.Key.Key_N
+                        and event.modifiers()
+                        == Qt.KeyboardModifier.ControlModifier))):
             event.accept()
             return True
         return super().event(event)
@@ -1561,10 +1608,9 @@ class BeeGraphicsView(MainControlsMixin,
                 event.accept()
                 return
             if event.button() == Qt.MouseButton.LeftButton:
-                if (sys.platform == 'darwin'
-                        and self.draw_tool == 'pen'
+                if (self.draw_tool == 'pen'
                         and modifiers
-                        & Qt.KeyboardModifier.ControlModifier):
+                        & self.keyboard_settings.temporary_eraser_qt_modifier):
                     self._temporary_eraser_tool = 'pen'
                     self.set_draw_tool('eraser', announce=False)
                 scene_pos = self.mapToScene(event.pos())
@@ -1797,8 +1843,13 @@ class BeeGraphicsView(MainControlsMixin,
             return
         if self.active_mode == self.DRAW_MODE:
             modifiers = event.modifiers()
-            if (sys.platform == 'darwin'
-                    and event.key() in (Qt.Key.Key_Control, Qt.Key.Key_Meta)
+            if (event.key() == Qt.Key.Key_N
+                    and modifiers
+                    == Qt.KeyboardModifier.ControlModifier):
+                self.on_action_insert_text()
+                event.accept()
+                return
+            if (event.key() == self.keyboard_settings.temporary_eraser_key
                     and not event.isAutoRepeat()
                     and self.draw_tool == 'pen'):
                 self._temporary_eraser_tool = self.draw_tool
@@ -1856,7 +1907,8 @@ class BeeGraphicsView(MainControlsMixin,
     def keyReleaseEvent(self, event):
         if (self.active_mode == self.DRAW_MODE
                 and self._temporary_eraser_tool is not None
-                and event.key() in (Qt.Key.Key_Control, Qt.Key.Key_Meta)
+                and event.key()
+                == self.keyboard_settings.temporary_eraser_key
                 and not event.isAutoRepeat()):
             previous = self._temporary_eraser_tool
             self._temporary_eraser_tool = None

@@ -37,6 +37,9 @@ class ActionsMixin:
         self._post_create_functions = []
         self._create_actions()
         self._create_menu(self.context_menu, menu_structure)
+        if 'quit' in actions:
+            self.context_menu.addSeparator()
+            self.context_menu.addAction(actions['quit'].qaction)
         for func, arg in self._post_create_functions:
             func(arg)
         del self._post_create_functions

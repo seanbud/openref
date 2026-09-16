@@ -135,11 +135,11 @@ def test_command_temporarily_switches_pen_to_eraser(qtbot, view):
     view.enter_draw_mode()
     view.set_draw_tool('pen')
 
-    qtbot.keyPress(view, QtCore.Qt.Key.Key_Meta)
+    qtbot.keyPress(view, QtCore.Qt.Key.Key_Control)
     assert view.draw_tool == 'eraser'
     assert view.draw_toolbar.eraser_button.isChecked()
     assert not view.draw_toolbar.tool_button.isChecked()
-    qtbot.keyRelease(view, QtCore.Qt.Key.Key_Meta)
+    qtbot.keyRelease(view, QtCore.Qt.Key.Key_Control)
     assert view.draw_tool == 'pen'
     assert not view.draw_toolbar.eraser_button.isChecked()
     assert view.draw_toolbar.tool_button.isChecked()

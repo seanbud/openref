@@ -14,6 +14,7 @@
 # along with BeeRef.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import sys
 
 from PyQt6 import QtWidgets
 
@@ -43,6 +44,28 @@ class ControlsDialog(QtWidgets.QDialog):
         kb_layout.addWidget(search_input)
         kb_layout.addWidget(table)
         tabs.addTab(keyboard, '&Keyboard Shortcuts')
+
+        modifier_row = QtWidgets.QHBoxLayout()
+        modifier_row.addWidget(QtWidgets.QLabel(
+            'Hold to temporarily erase while drawing:'))
+        self.eraser_modifier = QtWidgets.QComboBox(keyboard)
+        options = (
+            ('control', 'Command' if sys.platform == 'darwin' else 'Control'),
+            ('meta', 'Control' if sys.platform == 'darwin' else 'Meta'),
+            ('alt', 'Option' if sys.platform == 'darwin' else 'Alt'),
+            ('shift', 'Shift'),
+            ('off', 'Off'),
+        )
+        for value, label in options:
+            self.eraser_modifier.addItem(label, value)
+        self.eraser_modifier.setCurrentIndex(
+            self.eraser_modifier.findData(
+                KeyboardSettings().temporary_eraser_modifier()))
+        self.eraser_modifier.currentIndexChanged.connect(
+            lambda index: KeyboardSettings().set_temporary_eraser_modifier(
+                self.eraser_modifier.itemData(index)))
+        modifier_row.addWidget(self.eraser_modifier)
+        kb_layout.addLayout(modifier_row)
 
         # Mouse controls
         mouse = QtWidgets.QWidget(parent)
@@ -94,3 +117,7 @@ class ControlsDialog(QtWidgets.QDialog):
 
         if reply == QtWidgets.QMessageBox.StandardButton.Yes:
             KeyboardSettings().restore_defaults()
+            self.eraser_modifier.blockSignals(True)
+            self.eraser_modifier.setCurrentIndex(
+                self.eraser_modifier.findData('control'))
+            self.eraser_modifier.blockSignals(False)

@@ -139,13 +139,13 @@ class SelectableMixin(BaseItemMixin):
 
     SELECT_LINE_WIDTH = 4  # line width for the selection box
     SELECT_HANDLE_SIZE = 15  # size of selection handles for scaling
-    SELECT_RESIZE_SIZE = 20  # size of hover area for scaling
+    SELECT_RESIZE_SIZE = 28  # generous hit target for corner/edge scaling
     SELECT_ROTATE_SIZE = 10  # size of hover area for rotating
     SELECT_FREE_CENTER = 20  # size of handle-free area in the center
 
     SCALE_MODE = 1
     ROTATE_MODE = 2
-    FLIP_MODE = 3
+    FLIP_MODE = 3  # retained for old in-flight interactions
 
     def init_selectable(self):
         self.setAcceptHoverEvents(True)
@@ -185,7 +185,8 @@ class SelectableMixin(BaseItemMixin):
          even if it is covered by selection scale/flip/... handles.
          This ensures that small items can always still be moved/edited.
         """
-        size = self.fixed_length_for_viewport(self.SELECT_FREE_CENTER)
+        size = min(self.fixed_length_for_viewport(self.SELECT_FREE_CENTER),
+                   max(1.0, min(self.width, self.height) / 2))
         return QtCore.QRectF(
             self.center.x() - size/2,
             self.center.y() - size/2,
@@ -237,6 +238,10 @@ class SelectableMixin(BaseItemMixin):
             painter.setPen(pen)
             for corner in self.corners:
                 painter.drawPoint(corner)
+            pen.setWidth(max(8, self.SELECT_HANDLE_SIZE - 5))
+            painter.setPen(pen)
+            for edge in self.get_flip_bounds():
+                painter.drawPoint(edge['handle'])
 
     @property
     def corners(self):
@@ -288,60 +293,87 @@ class SelectableMixin(BaseItemMixin):
         return path - self.get_scale_bounds(corner, margin=0.001)
 
     def get_flip_bounds(self):
-        """The interactactable shape of the flip handles.
+        """Hit targets for proportional edge scaling.
 
-        These stretch around the edge of the item filling the areas
-        between the scale handles, e.g. for the bottom right corner:
-
-          │F│
-        ──┼─┼─┐
-        FF│S│R│
-        ──┼─┘ │
-          │R R│
-          └───┘
+        The legacy method name is retained for test and plugin compatibility.
         """
 
         outer_margin = self.select_resize_size / 2
-        inner_margin = self.select_resize_size / 2
+        inner_x = min(outer_margin, self.width / 4)
+        inner_y = min(outer_margin, self.height / 4)
         origin = self.bounding_rect_unselected().topLeft()
         return [
             # top:
             {
                 'rect': QtCore.QRectF(
-                    origin.x() + inner_margin,
+                    origin.x() + inner_x,
                     origin.y() - outer_margin,
-                    self.width - 2 * inner_margin,
-                    outer_margin + inner_margin),
+                    self.width - 2 * inner_x,
+                    outer_margin + inner_y),
                 'flip_v': True,
+                'handle': self.bounding_rect_unselected().topLeft()
+                + QtCore.QPointF(self.width / 2, 0),
+                'anchor': self.bounding_rect_unselected().bottomLeft()
+                + QtCore.QPointF(self.width / 2, 0),
             },
             # bottom:
             {
                 'rect': QtCore.QRectF(
-                    origin.x() + inner_margin,
-                    origin.y() + self.height - inner_margin,
-                    self.width - 2 * inner_margin,
-                    outer_margin + inner_margin),
+                    origin.x() + inner_x,
+                    origin.y() + self.height - inner_y,
+                    self.width - 2 * inner_x,
+                    outer_margin + inner_y),
                 'flip_v': True,
+                'handle': self.bounding_rect_unselected().bottomLeft()
+                + QtCore.QPointF(self.width / 2, 0),
+                'anchor': self.bounding_rect_unselected().topLeft()
+                + QtCore.QPointF(self.width / 2, 0),
             },
             # left:
             {
                 'rect': QtCore.QRectF(
                     origin.x() - outer_margin,
-                    origin.y() + inner_margin,
-                    outer_margin + inner_margin,
-                    self.height - 2 * inner_margin),
+                    origin.y() + inner_y,
+                    outer_margin + inner_x,
+                    self.height - 2 * inner_y),
                 'flip_v': False,
+                'handle': self.bounding_rect_unselected().topLeft()
+                + QtCore.QPointF(0, self.height / 2),
+                'anchor': self.bounding_rect_unselected().topRight()
+                + QtCore.QPointF(0, self.height / 2),
             },
             # right:
             {
                 'rect': QtCore.QRectF(
-                    origin.x() + self.width - inner_margin,
-                    origin.y() + inner_margin,
-                    outer_margin + inner_margin,
-                    self.height - 2 * inner_margin),
+                    origin.x() + self.width - inner_x,
+                    origin.y() + inner_y,
+                    outer_margin + inner_x,
+                    self.height - 2 * inner_y),
                 'flip_v': False,
+                'handle': self.bounding_rect_unselected().topRight()
+                + QtCore.QPointF(0, self.height / 2),
+                'anchor': self.bounding_rect_unselected().topLeft()
+                + QtCore.QPointF(0, self.height / 2),
             }
         ]
+
+    def get_resize_target(self, point):
+        """Pick the nearest corner or edge handle, even on thin strokes."""
+
+        candidates = []
+        for corner in self.corners:
+            if self.get_scale_bounds(corner).contains(point):
+                delta = point - corner
+                candidates.append((QtCore.QPointF.dotProduct(delta, delta),
+                                   'corner', corner))
+        for edge in self.get_flip_bounds():
+            if edge['rect'].contains(point):
+                delta = point - edge['handle']
+                candidates.append((QtCore.QPointF.dotProduct(delta, delta),
+                                   'edge', edge))
+        if not candidates:
+            return None
+        return min(candidates, key=lambda entry: entry[0])[1:]
 
     def boundingRect(self):
         if not self.has_selection_outline():
@@ -377,22 +409,20 @@ class SelectableMixin(BaseItemMixin):
             self.unset_cursor()
             return
 
+        target = self.get_resize_target(event.pos())
+        if target:
+            kind, handle = target
+            if kind == 'corner':
+                self.set_cursor(self.get_corner_scale_cursor(handle))
+            else:
+                self.set_cursor(
+                    Qt.CursorShape.SizeVerCursor
+                    if self.get_edge_flips_v(handle)
+                    else Qt.CursorShape.SizeHorCursor)
+            return
         for corner in self.corners:
-            # See if we need to change the cursor for interactable areas
-            if self.get_scale_bounds(corner).contains(event.pos()):
-                self.scene().cursor_changed.emit(
-                    self.get_corner_scale_cursor(corner))
-                self.set_cursor(self.get_corner_scale_cursor(corner))
-                return
-            elif self.get_rotate_bounds(corner).contains(event.pos()):
+            if self.get_rotate_bounds(corner).contains(event.pos()):
                 self.set_cursor(BeeAssets().cursor_rotate)
-                return
-        for edge in self.get_flip_bounds():
-            if edge['rect'].contains(event.pos()):
-                if self.get_edge_flips_v(edge):
-                    self.set_cursor(BeeAssets().cursor_flip_v)
-                else:
-                    self.set_cursor(BeeAssets().cursor_flip_h)
                 return
 
         self.unset_cursor()
@@ -418,20 +448,29 @@ class SelectableMixin(BaseItemMixin):
 
         if (event.button() == Qt.MouseButton.LeftButton
                 and self.has_selection_handles()):
+            target = self.get_resize_target(event.pos())
+            if target:
+                kind, handle = target
+                self.active_mode = self.SCALE_MODE
+                self.event_direction = self.get_direction_from_center(
+                    event.scenePos())
+                anchor = (self.get_scale_anchor(handle)
+                          if kind == 'corner' else handle['anchor'])
+                self._resize_flip_vertical = (
+                    kind == 'edge' and handle['flip_v'])
+                self.event_anchor = self.mapToScene(anchor)
+                self._resize_items = self.selection_action_items()
+                self._resize_before = commands.ResizeItems.capture(
+                    self._resize_items)
+                self.event_resize_vector = (
+                    self.event_start - self.event_anchor)
+                self._resize_original_flips = {
+                    item: item.flip() for item in self._resize_items}
+                for item in self._resize_items:
+                    item.scale_orig_factor = item.scale()
+                event.accept()
+                return
             for corner in self.corners:
-                # Check if we are in one of the corner's scale areas
-                if self.get_scale_bounds(corner).contains(event.pos()):
-                    # Start scale action for this corner
-                    self.active_mode = self.SCALE_MODE
-                    self.event_direction = self.get_direction_from_center(
-                        event.scenePos())
-                    self.event_anchor = self.mapToScene(
-                        self.get_scale_anchor(corner))
-                    for item in self.selection_action_items():
-                        item.scale_orig_factor = item.scale()
-                    event.accept()
-                    return
-                # Check if we are in one of the corner's rotate areas
                 if self.get_rotate_bounds(corner).contains(event.pos()):
                     # Start rotate action
                     self.active_mode = self.ROTATE_MODE
@@ -442,22 +481,17 @@ class SelectableMixin(BaseItemMixin):
                         item.rotate_orig_degrees = item.rotation()
                     event.accept()
                     return
-                # Check if we are in one of the flip edges:
-                for edge in self.get_flip_bounds():
-                    if edge['rect'].contains(event.pos()):
-                        self.active_mode = self.FLIP_MODE
-                        event.accept()
-                        self.scene().undo_stack.push(
-                            commands.FlipItems(
-                                self.selection_action_items(),
-                                self.center_scene_coords,
-                                vertical=self.get_edge_flips_v(edge)))
-                        return
-
         super().mousePressEvent(event)
 
     def get_scale_factor(self, event):
         """Get the scale factor for the current mouse movement."""
+        if hasattr(self, 'event_resize_vector'):
+            vector = self.event_resize_vector
+            length_squared = QtCore.QPointF.dotProduct(vector, vector)
+            if length_squared > 0.0001:
+                current = event.scenePos() - self.event_anchor
+                return (QtCore.QPointF.dotProduct(current, vector)
+                        / length_squared)
         imgsize = math.sqrt(self.width**2 + self.height**2)
         p = event.scenePos() - self.event_start
         direction = self.event_direction
@@ -551,8 +585,19 @@ class SelectableMixin(BaseItemMixin):
         if self.active_mode == self.SCALE_MODE:
             factor = self.get_scale_factor(event)
             for item in self.selection_action_items():
-                item.setScale(item.scale_orig_factor * factor,
-                              item.mapFromScene(self.event_anchor))
+                if hasattr(self, '_resize_before'):
+                    original_flip = self._resize_original_flips[item]
+                    desired_flip = original_flip * (-1 if factor < 0 else 1)
+                    if item.flip() != desired_flip:
+                        item.do_flip(
+                            vertical=self._resize_flip_vertical,
+                            anchor=item.mapFromScene(self.event_anchor))
+                    item.setScale(
+                        item.scale_orig_factor * max(abs(factor), 0.005),
+                        item.mapFromScene(self.event_anchor))
+                else:
+                    item.setScale(item.scale_orig_factor * factor,
+                                  item.mapFromScene(self.event_anchor))
             event.accept()
             return
         if self.active_mode == self.ROTATE_MODE:
@@ -576,7 +621,14 @@ class SelectableMixin(BaseItemMixin):
 
     def mouseReleaseEvent(self, event):
         if self.active_mode == self.SCALE_MODE:
-            if self.get_scale_factor(event) != 1:
+            if hasattr(self, '_resize_before'):
+                after = commands.ResizeItems.capture(self._resize_items)
+                if after != self._resize_before:
+                    self.scene().undo_stack.push(commands.ResizeItems(
+                        self._resize_before, after))
+                del self._resize_before
+                del self.event_resize_vector
+            elif self.get_scale_factor(event) != 1:
                 self.scene().undo_stack.push(
                     commands.ScaleItemsBy(
                         self.selection_action_items(),

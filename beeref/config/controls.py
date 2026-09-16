@@ -186,6 +186,36 @@ class MouseConfig(MouseConfigBase):
 
 class KeyboardSettings(QtCore.QSettings):
 
+    ERASER_MODIFIERS = {
+        'control': (Qt.Key.Key_Control, Qt.KeyboardModifier.ControlModifier),
+        'alt': (Qt.Key.Key_Alt, Qt.KeyboardModifier.AltModifier),
+        'shift': (Qt.Key.Key_Shift, Qt.KeyboardModifier.ShiftModifier),
+        'meta': (Qt.Key.Key_Meta, Qt.KeyboardModifier.MetaModifier),
+        'off': (None, Qt.KeyboardModifier.NoModifier),
+    }
+
+    def temporary_eraser_modifier(self):
+        default = 'control'
+        value = self.get_value('Drawing', 'temporary_eraser_modifier',
+                               default)
+        return value if value in self.ERASER_MODIFIERS else default
+
+    def set_temporary_eraser_modifier(self, value):
+        if value not in self.ERASER_MODIFIERS:
+            raise ValueError(value)
+        self.set_value('Drawing', 'temporary_eraser_modifier', value,
+                       'control')
+
+    @property
+    def temporary_eraser_key(self):
+        return self.ERASER_MODIFIERS[
+            self.temporary_eraser_modifier()][0]
+
+    @property
+    def temporary_eraser_qt_modifier(self):
+        return self.ERASER_MODIFIERS[
+            self.temporary_eraser_modifier()][1]
+
     MOUSEWHEEL_ACTIONS = ActionList([
         MouseWheelConfig(
             id='zoom1',

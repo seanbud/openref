@@ -71,6 +71,56 @@ class DeleteItems(QtGui.QUndoCommand):
             self.scene.addItem(item)
 
 
+class ChangeZValues(QtGui.QUndoCommand):
+    """Undoable, explicit layer reorder."""
+
+    def __init__(self, before, after):
+        super().__init__('Change layer order')
+        self.before = before
+        self.after = after
+
+    def redo(self):
+        for item, z_value in self.after.items():
+            item.setZValue(z_value)
+
+    def undo(self):
+        for item, z_value in self.before.items():
+            item.setZValue(z_value)
+
+
+class ResizeItems(QtGui.QUndoCommand):
+    """Undoable proportional resize, including a mirror across the anchor."""
+
+    def __init__(self, before, after):
+        super().__init__('Resize items')
+        self.before = before
+        self.after = after
+        self.ignore_first_redo = True
+
+    @staticmethod
+    def capture(items):
+        return {item: (QtCore.QPointF(item.pos()), item.scale(),
+                       item.rotation(),
+                       QtGui.QTransform(item.transform())) for item in items}
+
+    @staticmethod
+    def _apply(states):
+        for item, (position, scale, rotation, transform) in states.items():
+            item.setScale(scale)
+            item.setRotation(rotation)
+            item.setTransform(transform)
+            item.setPos(position)
+
+    def redo(self):
+        if self.ignore_first_redo:
+            self.ignore_first_redo = False
+            return
+        self._apply(self.after)
+
+    def undo(self):
+        self._apply(self.before)
+
+
 class MoveItemsBy(QtGui.QUndoCommand):
 
     def __init__(self, items, delta, ignore_first_redo=False):

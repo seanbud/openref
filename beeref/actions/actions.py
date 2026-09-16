@@ -149,7 +149,7 @@ actions = ActionList([
     ),
     Action(
         id='quit',
-        text='&Quit',
+        text='Quit &Application',
         shortcuts=['Ctrl+Q'],
         callback='on_action_quit',
     ),
@@ -162,7 +162,7 @@ actions = ActionList([
     Action(
         id='insert_text',
         text='&Text',
-        shortcuts=['Ctrl+T'],
+        shortcuts=['Ctrl+N'],
         callback='on_action_insert_text',
     ),
     Action(
@@ -208,16 +208,28 @@ actions = ActionList([
     ),
     Action(
         id='raise_to_top',
-        text='&Raise to Top',
+        text='Bring to &Front',
         shortcuts=['Up', 'PgUp'],
         callback='on_action_raise_to_top',
         group='active_when_selection',
     ),
     Action(
         id='lower_to_bottom',
-        text='Lower to Bottom',
+        text='Send to &Back',
         shortcuts=['Down', 'PgDown'],
         callback='on_action_lower_to_bottom',
+        group='active_when_selection',
+    ),
+    Action(
+        id='move_forward',
+        text='Move &Forward',
+        callback='on_action_move_forward',
+        group='active_when_selection',
+    ),
+    Action(
+        id='move_backward',
+        text='Move &Backward',
+        callback='on_action_move_backward',
         group='active_when_selection',
     ),
     Action(
@@ -317,7 +329,7 @@ actions = ActionList([
     Action(
         id='new_scene',
         text='&New Scene',
-        shortcuts=['Ctrl+N'],
+        shortcuts=['Ctrl+Shift+N'],
         callback='on_action_new_scene',
     ),
     Action(
@@ -466,6 +478,7 @@ actions = ActionList([
     Action(
         id='set_brush_color',
         text='Brush &Color...',
+        shortcuts=['Ctrl+T'],
         callback='on_action_set_brush_color',
     ),
     Action(

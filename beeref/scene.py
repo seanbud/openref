@@ -163,6 +163,35 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         for item in items:
             item.setZValue(item.zValue() + delta)
 
+    def move_selection_one_layer(self, forward=True):
+        """Move selected items one place without disturbing their order."""
+
+        self.cancel_active_modes()
+        ordered = list(self.items_for_save())
+        selected = set(self.selectedItems(user_only=True))
+        if not selected or len(ordered) == len(selected):
+            return
+        before = {item: item.zValue() for item in ordered}
+        moved = False
+        indexes = (range(len(ordered) - 2, -1, -1) if forward
+                   else range(1, len(ordered)))
+        step = 1 if forward else -1
+        for index in indexes:
+            neighbor = index + step
+            if (ordered[index] in selected
+                    and ordered[neighbor] not in selected):
+                ordered[index], ordered[neighbor] = (
+                    ordered[neighbor], ordered[index])
+                moved = True
+        if moved:
+            slots = sorted(before.values())
+            after = {item: z for item, z in zip(ordered, slots)}
+            if len(set(slots)) != len(slots):
+                base = slots[0]
+                after = {item: base + index * self.Z_STEP
+                         for index, item in enumerate(ordered)}
+            self.undo_stack.push(commands.ChangeZValues(before, after))
+
     def normalize_width_or_height(self, mode):
         """Scale the selected images to have the same width or height, as
         specified by ``mode``.
@@ -407,6 +436,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         return False
 
     def mousePressEvent(self, event):
+        item_at_pos = None
         if event.button() == Qt.MouseButton.RightButton:
             # Right-click invokes the context menu on the
             # GraphicsView. We don't need it here.
@@ -435,6 +465,12 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 self.active_mode = self.RUBBERBAND_MODE
 
         super().mousePressEvent(event)
+        if (event.button() == Qt.MouseButton.LeftButton
+                and item_at_pos is not None
+                and item_at_pos is not self.multi_select_item
+                and hasattr(item_at_pos, 'bring_to_front')
+                and item_at_pos.scene() is self):
+            item_at_pos.bring_to_front()
 
     def mouseDoubleClickEvent(self, event):
         self.cancel_active_modes()

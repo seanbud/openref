@@ -139,18 +139,24 @@ class PopoverFrame(QtWidgets.QFrame):
         self.hide()
 
     def show_for(self, anchor):
+        self._anchor = anchor
+        self.reposition_for_anchor()
+        self.show()
+        self.raise_()
+
+    def reposition_for_anchor(self):
+        anchor = getattr(self, '_anchor', None)
+        if anchor is None:
+            return
         self.adjustSize()
         parent = self.parentWidget()
         if parent is None:
-            self.show()
             return
         anchor_pos = anchor.mapTo(parent, QtCore.QPoint(0, 0))
         x = anchor_pos.x() + (anchor.width() - self.width()) // 2
         x = max(8, min(x, parent.width() - self.width() - 8))
         y = max(8, anchor_pos.y() - self.height() - 6)
         self.move(x, y)
-        self.show()
-        self.raise_()
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
@@ -372,6 +378,11 @@ class DrawingToolbar(QtWidgets.QFrame):
         for popover in self.popovers:
             if popover is not except_for:
                 popover.hide()
+
+    def reposition_popovers(self):
+        for popover in self.popovers:
+            if popover.isVisible():
+                popover.reposition_for_anchor()
 
     def _toggle(self, popover, anchor):
         was_visible = popover.isVisible()
