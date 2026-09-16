@@ -7,10 +7,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      QT_QPA_PLATFORM: offscreen
     strategy:
       matrix:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
-        pyqt-version: ["6.7.0"]
+        pyqt-version: ["6.7.1"]
     steps:
       - uses: actions/checkout@v4
       - name: Set up Python
@@ -21,7 +22,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt install libgl1 libegl1 libglib2.0-0 libxcb-image0 libxkbcommon-x11-0 libxcb-icccm4 libxcb-keysyms1 xserver-xephyr libfontconfig1 libxkbcommon-dev libdbus-1-3 libxcb-randr0 libxcb-render-util0 libxcb-xinerama0 libxcb-xfixes0 libxcb-cursor0
-          sudo apt install xvfb
           python -m pip install --upgrade pip
           pip install .
           # We want to test against installed package instead of source files
@@ -30,10 +30,8 @@ jobs:
           mv beeref_inst/beeref beeref
           rm -r beeref_inst
           pip install -r requirements/test.txt
-          pip install pyQt6==${{ matrix.pyqt-version }} pyQt6-Qt6==${{ matrix.pyqt-version }} --upgrade
       - name: Run Unittests with pytest
-        run: |
-          xvfb-run --auto-servernum --server-num=1 --server-args="-screen 1 1920x1200x24 -ac +extension GLX" pytest --cov --cov-report=xml
+        run: pytest -x --cov --cov-report=xml
       - name: Upload Coverage report to Codecov
         if: env.CODECOV_TOKEN != ''
         uses: codecov/codecov-action@v4
