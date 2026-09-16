@@ -1,3 +1,37 @@
+0.5.0 beta 1
+============
+
+Added
+-----
+
+* File dialogs reopen in the last folder used, with Documents as the fresh
+  profile default; the chosen drawing color persists across restarts.
+* The canvas context menu exposes Quit Application and explicit front/back
+  arrangement, including one-step Move Forward and Move Backward.
+* The temporary pen-to-eraser modifier is configurable in Keyboard & Mouse
+  Controls; the defaults are Command on macOS and Control on Windows.
+
+Changed
+-------
+
+* New Text Box uses Ctrl+N (Command+N on macOS); New Board uses Ctrl+Shift+N.
+  The text shortcut exits an active drawing session and inserts a text box.
+* New strokes use a canvas-space width derived from the current zoom, just
+  like new text boxes do, so their apparent drawing width stays consistent.
+* Selecting an object, including a drawing, brings it to the front.
+* Edge and corner drags proportionally scale images, text, and drawings.
+  Larger corner targets and thin-stroke edge targets make resizing easier;
+  dragging past the opposite bound mirrors the item as part of the resize.
+* Windows fullscreen right-drag restores the window centered under the cursor
+  while preserving the canvas point beneath it.
+
+Fixed
+-----
+
+* Drawing option popovers stay anchored to the screen-space dock through
+  canvas zoom and pan.
+
+
 0.4.0 beta 2
 ============
 

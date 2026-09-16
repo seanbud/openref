@@ -15,7 +15,7 @@
 
 APPNAME = 'OpenRef'
 APPNAME_FULL = f'{APPNAME} Reference Canvas'
-VERSION = '0.4.0b2'
+VERSION = '0.5.0b1'
 WEBSITE = 'https://github.com/seanbud/openref'
 COPYRIGHT = ('OpenRef © 2026 Sean Budning · '
              'BeeRef © 2021-2024 Rebecca Breu')
