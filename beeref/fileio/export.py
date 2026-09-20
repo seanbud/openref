@@ -162,6 +162,81 @@ class SceneToSVGExporter(SceneExporterBase):
 
     TYPE = 'svg'
 
+    _TEXT_IMAGE_DENSITY = 2.0
+    _MAX_TEXT_IMAGE_DIMENSION = 4096
+
+    def __init__(self, scene):
+        super().__init__(scene)
+        # SVG export is performed by ThreadedIO after this exporter has been
+        # created on the GUI thread. Snapshot text documents here so the
+        # worker never asks Qt's GUI-owned document/layout objects to render.
+        self._text_images = {
+            id(item): self._render_text_to_image(item)
+            for item in self.scene.items()
+            if item.TYPE == 'text'
+        }
+
+    @classmethod
+    def _render_text_to_image(cls, item):
+        """Rasterize one note without selection or editing decorations."""
+        rect = item.boundingRect()
+        logical_width = max(1.0, rect.width())
+        logical_height = max(1.0, rect.height())
+        density = cls._TEXT_IMAGE_DENSITY
+        density = min(density,
+                      cls._MAX_TEXT_IMAGE_DIMENSION / logical_width,
+                      cls._MAX_TEXT_IMAGE_DIMENSION / logical_height)
+        density = max(1.0 / max(logical_width, logical_height), density)
+        image = QtGui.QImage(
+            max(1, int(round(logical_width * density))),
+            max(1, int(round(logical_height * density))),
+            QtGui.QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(QtCore.Qt.GlobalColor.transparent)
+
+        painter = QtGui.QPainter(image)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.TextAntialiasing)
+        painter.scale(density, density)
+        # Draw the same card appearance as BeeTextItem.paint(), then draw the
+        # document directly. Calling QGraphicsTextItem.paint() here can block
+        # in headless/export worker contexts; direct document rendering also
+        # guarantees that no editing caret or placeholder is included.
+        appearance = getattr(item, 'appearance', None)
+        if appearance:
+            painter.setBrush(QtGui.QColor(appearance['fill']))
+            border_width = appearance['border_width']
+            if border_width:
+                painter.setPen(QtGui.QPen(
+                    QtGui.QColor(appearance['border_color']), border_width))
+            else:
+                painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            radius = appearance['radius']
+            painter.drawRoundedRect(
+                QtCore.QRectF(
+                    0, 0, logical_width, logical_height).adjusted(
+                    border_width / 2, border_width / 2,
+                    -border_width / 2, -border_width / 2),
+                radius, radius)
+        else:
+            painter.setPen(QtCore.Qt.PenStyle.NoPen)
+            painter.fillRect(
+                QtCore.QRectF(0, 0, logical_width, logical_height),
+                QtGui.QColor(0, 0, 0, 40))
+        item.document().drawContents(
+            painter, QtCore.QRectF(0, 0, logical_width, logical_height))
+        painter.end()
+        return image
+
+    @staticmethod
+    def _image_to_data_uri(image):
+        byte_array = QtCore.QByteArray()
+        buffer = QtCore.QBuffer(byte_array)
+        buffer.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+        image.save(buffer, 'PNG')
+        buffer.close()
+        encoded = base64.b64encode(byte_array.data()).decode('ascii')
+        return f'data:image/png;base64,{encoded}'
+
     def get_user_input(self, parent):
         self.size = self.default_size
         return True
@@ -204,12 +279,16 @@ class SceneToSVGExporter(SceneExporterBase):
             anchor = pos
 
             if item.TYPE == 'text':
-                styles = self._get_textstyles(item)
+                image = self._text_images[id(item)]
+                width = item.boundingRect().width() * item.scale()
+                height = item.boundingRect().height() * item.scale()
                 element = ET.Element(
-                    'text',
-                    attrib={'style': ';'.join(styles),
-                            'dominant-baseline': 'hanging'})
-                element.text = item.toPlainText()
+                    'image',
+                    attrib={
+                        'xlink:href': self._image_to_data_uri(image),
+                        'width': str(width),
+                        'height': str(height),
+                        'image-rendering': 'optimizeQuality'})
             if item.TYPE == 'pixmap':
                 width = item.width * item.scale()
                 height = item.height * item.scale()

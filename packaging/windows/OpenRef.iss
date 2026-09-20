@@ -1,8 +1,8 @@
 #ifndef MyAppVersion
-  #define MyAppVersion "0.4.0"
+  #define MyAppVersion "0.6.0"
 #endif
 #ifndef MyAppVersionInfo
-  #define MyAppVersionInfo "0.4.0.0"
+  #define MyAppVersionInfo "0.6.0.0"
 #endif
 
 [Setup]
@@ -44,6 +44,14 @@ Source: "..\..\CONTRIBUTORS.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\ASSET_PROVENANCE.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\build\legal\third-party\*"; DestDir: "{app}\THIRD_PARTY_LICENSES"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\..\build\legal\build-provenance.json"; DestDir: "{app}"; Flags: ignoreversion
+
+[Registry]
+; Register only the native board format. Legacy .bee files can still be
+; imported/opened from OpenRef without taking over their existing association.
+Root: HKCU; Subkey: "Software\Classes\.openref"; ValueType: string; ValueName: ""; ValueData: "OpenRef.Document"; Flags: uninsdeletevalue
+Root: HKCU; Subkey: "Software\Classes\OpenRef.Document"; ValueType: string; ValueName: ""; ValueData: "OpenRef board"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\OpenRef.Document\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\OpenRef.exe,0"
+Root: HKCU; Subkey: "Software\Classes\OpenRef.Document\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\OpenRef.exe"" ""%1"""
 
 [Icons]
 Name: "{autoprograms}\OpenRef"; Filename: "{app}\OpenRef.exe"

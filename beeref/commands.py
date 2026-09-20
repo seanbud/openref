@@ -366,17 +366,43 @@ class CropItem(QtGui.QUndoCommand):
 
 class ChangeText(QtGui.QUndoCommand):
 
-    def __init__(self, item, new_text, old_text):
+    def __init__(self, item, new_text, old_text, remove_when_empty=False):
         super().__init__('Change text')
         self.item = item
         self.new_text = new_text
         self.old_text = old_text
+        self.remove_when_empty = remove_when_empty
+        self._scene = item.scene()
+
+    def _set(self, value):
+        # ``str`` is kept for old .bee files and for third party callers of
+        # this command.  Rich notes pass their complete serializable state.
+        if isinstance(value, dict) and hasattr(self.item, 'set_text_state'):
+            self.item.set_text_state(value)
+        else:
+            self.item.setPlainText(value)
+
+    def _is_empty(self, value):
+        if isinstance(value, dict):
+            value = value.get('text', '')
+        return not str(value).strip()
 
     def redo(self):
-        self.item.setPlainText(self.new_text)
+        self._set(self.new_text)
+        if (self.remove_when_empty and self._is_empty(self.new_text)
+                and self.item.scene() is not None):
+            self.item.scene().removeItem(self.item)
 
     def undo(self):
-        self.item.setPlainText(self.old_text)
+        # A rich-note edit and removal are one board-history action.  Unlike
+        # DeleteItems this restores the pre-edit content as well as the item.
+        if self.remove_when_empty and self.item.scene() is None:
+            self.scene.addItem(self.item)
+        self._set(self.old_text)
+
+    @property
+    def scene(self):
+        return self._scene
 
 
 class ChangeDrawing(QtGui.QUndoCommand):

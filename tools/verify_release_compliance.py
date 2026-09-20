@@ -23,11 +23,38 @@ def locked_versions():
     return result
 
 
+def verify_source_bundle_pins(versions):
+    """Keep corresponding-source URLs aligned with the release runtime lock."""
+    source_bundle = Path('tools/build_source_bundle.py').read_text()
+    for name in ('PyQt6', 'PyQt6-sip'):
+        expected = versions.get(name)
+        if expected and f"'{name}': '{expected}'" not in source_bundle:
+            raise SystemExit(
+                f'{name}: source-bundle pin does not match runtime lock')
+
+    qt_version = versions.get('PyQt6-Qt6')
+    if qt_version:
+        expected_fragments = (
+            f'/6.7/{qt_version}/',
+            f'qtbase-everywhere-src-{qt_version}',
+            f'qtimageformats-everywhere-src-{qt_version}',
+            f'qtsvg-everywhere-src-{qt_version}',
+        )
+        missing = [fragment for fragment in expected_fragments
+                   if fragment not in source_bundle]
+        if missing:
+            raise SystemExit(
+                'Qt source-bundle pins do not match runtime lock: '
+                + ', '.join(missing))
+
+
 def main():
     absent = [path for path in REQUIRED if not Path(path).is_file()]
     if absent:
         raise SystemExit('Missing release files: ' + ', '.join(absent))
-    for name, expected in locked_versions().items():
+    versions = locked_versions()
+    verify_source_bundle_pins(versions)
+    for name, expected in versions.items():
         actual = metadata.version(name)
         if actual != expected:
             message = f'{name}: installed {actual}, expected {expected}'

@@ -61,7 +61,10 @@ def test_set_pos_center_when_rotated(qapp):
 
 def test_get_extra_save_data(qapp):
     item = BeeTextItem('foo bar')
-    assert item.get_extra_save_data() == {'text': 'foo bar'}
+    data = item.get_extra_save_data()
+    assert data['text'] == 'foo bar'
+    assert set(data) == {
+        'text', 'html', 'font_size', 'text_width', 'appearance'}
 
 
 @patch('beeref.items.BeeTextItem.boundingRect')
@@ -88,7 +91,7 @@ def test_paint(paint_mock, qapp):
     option = MagicMock()
     item.paint(painter, option, 'widget')
     item.paint_selectable.assert_called_once()
-    painter.drawRect.assert_called_once()
+    painter.drawRoundedRect.assert_called_once()
     assert option.state == QtWidgets.QStyle.StateFlag.State_Enabled
     paint_mock.assert_called_once_with(painter, option, 'widget')
 
@@ -325,8 +328,8 @@ def test_key_press_event_return(exit_mock, key_press_mock, view):
     event.key.return_value = Qt.Key.Key_Return
     event.modifiers.return_value = Qt.KeyboardModifier.NoModifier
     item.keyPressEvent(event)
-    key_press_mock.assert_not_called()
-    exit_mock.assert_called_once_with()
+    key_press_mock.assert_called_once_with(event)
+    exit_mock.assert_not_called()
 
 
 @patch('PyQt6.QtWidgets.QGraphicsTextItem.keyPressEvent')
@@ -339,8 +342,8 @@ def test_key_press_event_enter(exit_mock, key_press_mock, view):
     event.key.return_value = Qt.Key.Key_Enter
     event.modifiers.return_value = Qt.KeyboardModifier.NoModifier
     item.keyPressEvent(event)
-    key_press_mock.assert_not_called()
-    exit_mock.assert_called_once_with()
+    key_press_mock.assert_called_once_with(event)
+    exit_mock.assert_not_called()
 
 
 @patch('PyQt6.QtWidgets.QGraphicsTextItem.keyPressEvent')
@@ -354,7 +357,7 @@ def test_key_press_event_escape(exit_mock, key_press_mock, view):
     event.modifiers.return_value = Qt.KeyboardModifier.NoModifier
     item.keyPressEvent(event)
     key_press_mock.assert_not_called()
-    exit_mock.assert_called_once_with(commit=False)
+    exit_mock.assert_called_once_with()
 
 
 def test_item_to_clipboard(qapp):

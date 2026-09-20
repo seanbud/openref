@@ -7,8 +7,8 @@ archives for each build are included in its corresponding-source archive.
 | Component | Version | License |
 | --- | --- | --- |
 | Python | 3.11.9 | Python Software Foundation License |
-| PyQt6 | 6.7.0 | GNU GPL version 3 only |
-| Qt | 6.7.0 | GNU LGPL version 3 / GNU GPL version 3, plus component notices |
+| PyQt6 | 6.7.1 | GNU GPL version 3 only |
+| Qt | 6.7.1 | GNU LGPL version 3 / GNU GPL version 3, plus component notices |
 | PyQt6-sip | 13.12.0 | BSD 2-Clause |
 | exif | 1.6.0 | MIT |
 | plum-py | 0.8.7 | MIT |

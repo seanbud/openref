@@ -60,7 +60,9 @@ def main():
     # PyQt6 metadata identifies GPLv3 but does not ship a license text. The
     # repository's exact GPLv3 text supplies it in the binary notice bundle.
     if 'PyQt6' in missing:
-        shutil.copyfile('LICENSE', args.output / 'PyQt6-6.7.0-GPL-3.0.txt')
+        version = metadata.version('PyQt6')
+        shutil.copyfile('LICENSE',
+                        args.output / f'PyQt6-{version}-GPL-3.0.txt')
         missing.remove('PyQt6')
     if missing:
         raise RuntimeError('No license text found for: ' + ', '.join(missing))

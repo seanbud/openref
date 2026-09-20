@@ -142,6 +142,14 @@ if sys.platform == 'darwin':
         info_plist={
             'CFBundleDocumentTypes': [
                 {
+                    'CFBundleTypeName': 'OpenRef board',
+                    'CFBundleTypeExtensions': [ 'openref' ],
+                    'CFBundleTypeRole': 'Editor'
+                },
+                {
+                    # Legacy BeeRef boards remain openable/importable, but are
+                    # not presented as OpenRef's native editable format.
+                    'CFBundleTypeName': 'BeeRef board',
                     'CFBundleTypeExtensions': [ 'bee' ],
                     'CFBundleTypeRole': 'Viewer'
                 }

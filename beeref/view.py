@@ -37,8 +37,9 @@ from beeref import fileio
 from beeref.fileio.errors import IMG_LOADING_ERROR_MSG
 from beeref.fileio.export import exporter_registry, ImagesToDirectoryExporter
 from beeref import widgets
-from beeref.items import BeePixmapItem, BeeTextItem, BeePathItem
+from beeref.items import BeePixmapItem, BeePathItem
 from beeref.main_controls import MainControlsMixin
+from beeref.notes import NoteEditingMixin
 from beeref.scene import BeeGraphicsScene
 from beeref.utils import get_file_extension_from_format, qcolor_to_hex
 
@@ -47,7 +48,7 @@ commandline_args = CommandlineArgs()
 logger = logging.getLogger(__name__)
 
 
-class BeeGraphicsView(MainControlsMixin,
+class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                       QtWidgets.QGraphicsView,
                       ActionsMixin):
 
@@ -134,6 +135,7 @@ class BeeGraphicsView(MainControlsMixin,
                         *self.draw_toolbar.findChildren(QtWidgets.QWidget)):
             control.installEventFilter(self)
         self.draw_toolbar.hide()
+        self.init_note_tools()
         self.eraser_trail = widgets.modern_ui.EraserTrailOverlay(
             self.viewport())
         self.eraser_trail.stackUnder(self.draw_toolbar)
@@ -152,7 +154,7 @@ class BeeGraphicsView(MainControlsMixin,
         # Load files given via command line
         if commandline_args.filenames:
             fn = commandline_args.filenames[0]
-            if os.path.splitext(fn)[1] == '.bee':
+            if fileio.is_bee_file(fn):
                 self.open_from_file(fn)
             else:
                 self.do_insert_images(commandline_args.filenames)
@@ -250,7 +252,8 @@ class BeeGraphicsView(MainControlsMixin,
             self.welcome_overlay.show()
             self.actiongroup_set_enabled('active_when_items_in_scene', False)
         else:
-            self.setFocus()
+            if self.scene.edit_item is None:
+                self.setFocus()
             self.welcome_overlay.clearFocus()
             self.welcome_overlay.hide()
             has_items = bool(self.scene.items())
@@ -259,6 +262,7 @@ class BeeGraphicsView(MainControlsMixin,
             if has_items:
                 self.scene.expand_used_space()
         self.recalc_scene_rect()
+        self.refresh_note_tools()
 
     def on_can_redo_changed(self, can_redo):
         self.actiongroup_set_enabled('active_when_can_redo', can_redo)
@@ -462,6 +466,9 @@ class BeeGraphicsView(MainControlsMixin,
             '◆' if checked else '◇', 'lock_window')
 
     def on_action_undo(self):
+        if self.scene.edit_item is not None:
+            self.scene.edit_item.document().undo()
+            return
         logger.debug('Undo: %s' % self.undo_stack.undoText())
         if self.active_mode != self.DRAW_MODE:
             self.cancel_active_modes()
@@ -471,6 +478,9 @@ class BeeGraphicsView(MainControlsMixin,
             self.show_feedback(f'Undid {label.lower()}', '↶', 'undo')
 
     def on_action_redo(self):
+        if self.scene.edit_item is not None:
+            self.scene.edit_item.document().redo()
+            return
         logger.debug('Redo: %s' % self.undo_stack.redoText())
         if self.active_mode != self.DRAW_MODE:
             self.cancel_active_modes()
@@ -945,8 +955,7 @@ class BeeGraphicsView(MainControlsMixin,
             QtWidgets.QMessageBox.warning(
                 self,
                 'Problem loading file',
-                ('<p>Problem loading file %s</p>'
-                 '<p>Not accessible or not a proper bee file</p>') % filename)
+                f'Could not open {filename}:\n' + '\n'.join(map(str, errors)))
         else:
             self.filename = filename
             self.scene.add_queued_items()
@@ -984,12 +993,11 @@ class BeeGraphicsView(MainControlsMixin,
             parent=self,
             caption='Open file',
             directory=self._dialog_directory(),
-            filter=f'{constants.APPNAME} File (*.bee)')
+            filter='OpenRef Boards (*.openref *.bee)')
         if filename:
             filename = os.path.normpath(filename)
             self._remember_file_directory(filename)
             self.open_from_file(filename)
-            self.filename = filename
 
     def on_saving_finished(self, filename, errors):
         if errors:
@@ -1003,8 +1011,11 @@ class BeeGraphicsView(MainControlsMixin,
             self.undo_stack.setClean()
 
     def do_save(self, filename, create_new):
-        if not fileio.is_bee_file(filename):
-            filename = f'{filename}.bee'
+        if fileio.is_legacy_board(filename):
+            filename = os.path.splitext(filename)[0] + '.openref'
+            create_new = True
+        elif not filename.lower().endswith('.openref'):
+            filename = f'{filename}.openref'
         self.worker = fileio.ThreadedIO(
             fileio.save_bee, filename, self.scene, create_new=create_new)
         self.worker.finished.connect(self.on_saving_finished)
@@ -1016,18 +1027,21 @@ class BeeGraphicsView(MainControlsMixin,
 
     def on_action_save_as(self):
         self.cancel_active_modes()
+        directory = self._dialog_directory()
+        if self.filename and fileio.is_legacy_board(self.filename):
+            directory = os.path.splitext(self.filename)[0] + '.openref'
         filename, f = QtWidgets.QFileDialog.getSaveFileName(
             parent=self,
             caption='Save file',
-            directory=self._dialog_directory(),
-            filter=f'{constants.APPNAME} File (*.bee)')
+            directory=directory,
+            filter='OpenRef Board (*.openref)')
         if filename:
             self._remember_file_directory(filename)
             self.do_save(filename, create_new=True)
 
     def on_action_save(self):
         self.cancel_active_modes()
-        if not self.filename:
+        if not self.filename or fileio.is_legacy_board(self.filename):
             self.on_action_save_as()
         else:
             self.do_save(self.filename, create_new=False)
@@ -1151,8 +1165,6 @@ class BeeGraphicsView(MainControlsMixin,
         self.scene.add_queued_items()
         self.scene.arrange_default()
         self.undo_stack.endMacro()
-        if new_scene:
-            self.on_action_fit_scene()
         inserted = len(self.scene.selectedItems(user_only=True))
         if inserted:
             self.show_feedback(
@@ -1193,12 +1205,7 @@ class BeeGraphicsView(MainControlsMixin,
         self.do_insert_images(filenames)
 
     def on_action_insert_text(self):
-        self.cancel_active_modes()
-        item = BeeTextItem()
-        pos = self.mapToScene(self.mapFromGlobal(self.cursor().pos()))
-        item.setScale(1 / self.get_scale())
-        self.undo_stack.push(commands.InsertItems(self.scene, [item], pos))
-        self.show_feedback('Note added', '✎', 'insert_text')
+        self.create_note()
 
     def on_action_copy(self):
         logger.debug('Copying to clipboard...')
@@ -1223,6 +1230,9 @@ class BeeGraphicsView(MainControlsMixin,
             '⎘', 'copy')
 
     def on_action_paste(self):
+        if self.scene.edit_item is not None:
+            self.paste_note()
+            return
         self.cancel_active_modes()
         logger.debug('Pasting from clipboard...')
         clipboard = QtWidgets.QApplication.clipboard()
@@ -1244,17 +1254,18 @@ class BeeGraphicsView(MainControlsMixin,
         if not img.isNull():
             item = BeePixmapItem(img)
             self.undo_stack.push(commands.InsertItems(self.scene, [item], pos))
-            if len(self.scene.items()) == 1:
-                # This is the first image in the scene
-                self.on_action_fit_scene()
             self.show_feedback('Pasted image', '▣', 'paste')
             return
         text = clipboard.text()
-        if text:
-            item = BeeTextItem(text)
-            item.setScale(1 / self.get_scale())
-            self.undo_stack.push(commands.InsertItems(self.scene, [item], pos))
-            self.show_feedback('Pasted note', '✎', 'paste')
+        # A freshly-created empty QMimeData (used by callers and tests to
+        # represent an empty clipboard) must not fall back to stale text
+        # retained by the platform clipboard provider.
+        has_text = mime_data is not None and mime_data.hasText()
+        has_html = mime_data is not None and mime_data.hasHtml()
+        if mime_data is not None and not has_text and not has_html:
+            text = ''
+        if text or has_html:
+            self.create_note(mime=mime_data)
             return
 
         msg = 'No image data or text in clipboard or image too big'
@@ -1290,6 +1301,7 @@ class BeeGraphicsView(MainControlsMixin,
             finally:
                 self._syncing_actions = False
         self.viewport().repaint()
+        self.refresh_note_tools()
 
     def on_cursor_changed(self, cursor):
         if self.active_mode is None:
@@ -1455,6 +1467,7 @@ class BeeGraphicsView(MainControlsMixin,
         super().scrollContentsBy(dx, dy)
         if hasattr(self, 'draw_toolbar'):
             self._position_draw_toolbar()
+        self.refresh_note_tools()
 
     def pan(self, delta):
         hscroll = self.horizontalScrollBar()
@@ -1564,6 +1577,11 @@ class BeeGraphicsView(MainControlsMixin,
             super().tabletEvent(event)
 
     def event(self, event):
+        if (event.type() == QtCore.QEvent.Type.ShortcutOverride
+                and hasattr(self, 'scene')
+                and self.note_key_action(event)):
+            event.accept()
+            return True
         # Claim draw-mode shortcuts before the global QAction shortcuts.
         if (event.type() == QtCore.QEvent.Type.ShortcutOverride
                 and getattr(self, 'active_mode', None) == self.DRAW_MODE
@@ -1839,6 +1857,14 @@ class BeeGraphicsView(MainControlsMixin,
             self._hud_toast.reposition()
 
     def keyPressEvent(self, event):
+        note_action = self.note_key_action(event)
+        if note_action:
+            if note_action == 'native':
+                super().keyPressEvent(event)
+            else:
+                getattr(self, note_action)()
+                event.accept()
+            return
         if self.keyPressEventMainControls(event):
             return
         if self.active_mode == self.DRAW_MODE:

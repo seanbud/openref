@@ -168,10 +168,35 @@ def test_scene_to_svg_exporter_render_text(view):
     assert len(svg) == 1
 
     element = svg[0]
-    assert element.tag == 'text'
-    assert element.text == 'foo'
-    assert element.get('dominant-baseline') == 'hanging'
-    assert 'font-family' in element.get('style')
+    assert element.tag == 'image'
+    assert element.get('xlink:href').startswith(
+        'data:image/png;base64,iVBOR')
+    assert float(element.get('width')) > 0
+    assert float(element.get('height')) > 0
+    assert element.get('transform') == 'rotate(0.0 5.0 5.0)'
+    assert element.get('x') == '5.0'
+    assert element.get('y') == '5.0'
+
+
+def test_scene_to_svg_exporter_rasterizes_rich_text(view):
+    item = BeeTextItem('plain')
+    item.setHtml('<p><b>bold</b> <i>italic</i> '
+                 '<u>underlined</u> <s>strike</s></p>')
+    item.setPos(QtCore.QPointF(20, 30))
+    view.scene.addItem(item)
+    exporter = SceneToSVGExporter(view.scene)
+    exporter.size = QtCore.QSize(200, 400)
+    exporter.margin = 5
+    svg = exporter.render_to_svg()
+
+    element = svg[0]
+    assert element.tag == 'image'
+    encoded = element.get('xlink:href').split(',', 1)[1]
+    image = QtGui.QImage()
+    assert image.loadFromData(QtCore.QByteArray.fromBase64(
+        encoded.encode('ascii')), 'PNG')
+    assert image.width() >= 2
+    assert image.height() >= 2
     assert element.get('transform') == 'rotate(0.0 5.0 5.0)'
     assert element.get('x') == '5.0'
     assert element.get('y') == '5.0'

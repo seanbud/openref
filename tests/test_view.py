@@ -340,7 +340,7 @@ def test_on_action_save_as(dialog_mock, view, imgfilename3x3, tmpdir):
     item = BeePixmapItem(QtGui.QImage(imgfilename3x3))
     view.scene.addItem(item)
     view.cancel_active_modes = MagicMock()
-    filename = os.path.join(tmpdir, 'test.bee')
+    filename = os.path.join(tmpdir, 'test.openref')
     assert os.path.exists(filename) is False
     dialog_mock.return_value = (filename, None)
     view.on_action_save_as()
@@ -374,8 +374,9 @@ def test_on_action_save_as_filename_doesnt_end_with_bee(
     dialog_mock.return_value = (filename, None)
     view.on_action_save_as()
     qtbot.waitUntil(lambda: view.on_saving_finished.called is True)
-    assert os.path.exists(f'{filename}.bee') is True
-    view.on_saving_finished.assert_called_once_with(f'{filename}.bee', [])
+    assert os.path.exists(f'{filename}.openref') is True
+    view.on_saving_finished.assert_called_once_with(
+        f'{filename}.openref', [])
     view.cancel_active_modes.assert_called_once_with()
 
 
@@ -387,7 +388,7 @@ def test_on_action_save_as_when_error(
     view.scene.addItem(item)
     view.on_saving_finished = MagicMock()
     view.cancel_active_modes = MagicMock()
-    filename = os.path.join(tmpdir, 'test.bee')
+    filename = os.path.join(tmpdir, 'test.openref')
     dialog_mock.return_value = (filename, None)
     save_mock.side_effect = sqlite3.Error('foo')
     view.on_action_save_as()
@@ -400,7 +401,7 @@ def test_on_action_save(view, qtbot, imgfilename3x3, tmpdir):
     item = BeePixmapItem(QtGui.QImage(imgfilename3x3))
     view.scene.addItem(item)
     view.cancel_active_modes = MagicMock()
-    view.filename = os.path.join(tmpdir, 'test.bee')
+    view.filename = os.path.join(tmpdir, 'test.openref')
     root = os.path.dirname(__file__)
     shutil.copyfile(os.path.join(root, 'assets', 'test1item.bee'),
                     view.filename)
@@ -698,15 +699,14 @@ def test_on_action_insert_images_when_error(
     view.cancel_active_modes.assert_called_once_with()
 
 
-@patch('beeref.scene.BeeGraphicsScene.clearSelection')
-def test_on_action_insert_text(clear_mock, view):
+def test_on_action_insert_text(view):
     view.cancel_active_modes = MagicMock()
     view.on_action_insert_text()
-    clear_mock.assert_called_once_with()
     assert len(view.scene.items()) == 1
-    item = view.scene.items()[0]
-    assert item.toPlainText() == 'Text'
-    assert item.isSelected() is True
+    note = view.scene.items()[0]
+    assert note.toPlainText() == ''
+    assert note.isSelected() is True
+    assert note.edit_mode is True
     view.cancel_active_modes.assert_called_once_with()
 
 
@@ -736,23 +736,23 @@ def test_on_action_copy_text(clipboard_mock, view, imgfilename3x3):
     clipboard_mock.return_value.mimeData.return_value = mimedata
     view.on_action_copy()
 
-    clipboard_mock.return_value.setText.assert_called_once_with('foo bar')
+    clipboard_mock.return_value.setMimeData.assert_called_once()
+    copied_mime = clipboard_mock.return_value.setMimeData.call_args.args[0]
+    assert copied_mime.text() == 'foo bar'
     view.scene.internal_clipboard == [item]
     assert mimedata.data('beeref/items') == b'1'
     view.cancel_active_modes.assert_called_once_with()
 
 
-@patch('beeref.view.BeeGraphicsView.on_action_fit_scene')
 @patch('beeref.scene.BeeGraphicsScene.clearSelection')
 @patch('PyQt6.QtGui.QClipboard.image')
 def test_on_action_paste_external_new_scene(
-        clipboard_mock, clear_mock, fit_mock, view, imgfilename3x3):
+        clipboard_mock, clear_mock, view, imgfilename3x3):
     clipboard_mock.return_value = QtGui.QImage(imgfilename3x3)
     view.cancel_active_modes = MagicMock()
     view.on_action_paste()
     assert len(view.scene.items()) == 1
     assert view.scene.items()[0].isSelected() is True
-    fit_mock.assert_called_once_with()
     view.cancel_active_modes.assert_called_once_with()
 
 
@@ -789,29 +789,32 @@ def test_on_action_paste_internal(mimedata_mock, clear_mock, view):
 
 
 @patch('beeref.scene.BeeGraphicsScene.clearSelection')
-@patch('PyQt6.QtGui.QClipboard.text')
 @patch('PyQt6.QtGui.QClipboard.image')
-def test_on_action_paste_when_text(img_mock, text_mock, clear_mock, view):
+@patch('PyQt6.QtGui.QClipboard.mimeData')
+def test_on_action_paste_when_text(mime_mock, img_mock, clear_mock, view):
+    mime_data = QtCore.QMimeData()
+    mime_data.setText('foo bar')
+    mime_data.setHtml('<p>foo bar</p>')
+    mime_mock.return_value = mime_data
     img_mock.return_value = QtGui.QImage()
-    text_mock.return_value = 'foo bar'
     view.cancel_active_modes = MagicMock()
     view.on_action_paste()
     assert len(view.scene.items()) == 1
     assert view.scene.items()[0].isSelected() is True
     assert view.scene.items()[0].toPlainText() == 'foo bar'
     clear_mock.assert_called_once_with()
-    view.cancel_active_modes.assert_called_once_with()
+    assert view.cancel_active_modes.call_count == 2
 
 
 @patch('beeref.scene.BeeGraphicsScene.clearSelection')
-@patch('PyQt6.QtGui.QClipboard.text')
 @patch('PyQt6.QtGui.QClipboard.image')
+@patch('PyQt6.QtGui.QClipboard.mimeData')
 @patch('beeref.widgets.BeeNotification')
 def test_on_action_paste_when_empty(
-        notification_mock, img_mock, text_mock, clear_mock, view):
+        notification_mock, mime_mock, img_mock, clear_mock, view):
+    mime_mock.return_value = QtCore.QMimeData()
     view.cancel_active_modes = MagicMock()
     img_mock.return_value = QtGui.QImage()
-    text_mock.return_value = ''
     view.on_action_paste()
     assert len(view.scene.items()) == 0
     notification_mock.assert_called()

@@ -162,7 +162,7 @@ def test_sqliteio_create_schema_on_new_when_not_create_new(
         'SELECT COUNT(*) FROM sqlite_master '
         'WHERE type="table" AND name NOT LIKE "sqlite_%"')
     assert result[0] == 0
-    scene_mock.clear_save_ids.assert_not_called()
+    scene_mock.clear_save_ids.assert_called_once()
 
 
 def test_sqliteio_readonly_doesnt_allow_write(view, tmpfile):
@@ -229,7 +229,7 @@ def test_sqliteio_write_inserts_new_text_item(tmpfile, view):
     assert result[3] == 1.3
     assert result[4] == 33
     assert result[5] == -1
-    assert json.loads(result[6]) == {'text': 'foo bar'}
+    assert json.loads(result[6]) == item.get_extra_save_data()
     assert result[7] == 'text'
     assert result[8] is None
     assert result[9] is None
@@ -336,7 +336,7 @@ def test_sqliteio_write_updates_existing_text_item(tmpfile, view):
     assert result[3] == 0.7
     assert result[4] == 100
     assert result[5] == -1
-    assert json.loads(result[6]) == {'text': 'updated'}
+    assert json.loads(result[6]) == item.get_extra_save_data()
     assert result[7] is None
 
 
@@ -480,7 +480,7 @@ def test_sqliteio_write_removes_nonexisting_pixmap_item(tmpfile, view):
     assert io.fetchone('SELECT COUNT(*) from sqlar') == (0,)
 
 
-def test_sqliteio_write_update_recovers_from_borked_file(view, tmpfile):
+def test_sqliteio_write_update_rejects_borked_file(view, tmpfile):
     item = BeePixmapItem(QtGui.QImage(), filename='bee.png')
     item.save_id = 1
     view.scene.addItem(item)
@@ -489,9 +489,9 @@ def test_sqliteio_write_update_recovers_from_borked_file(view, tmpfile):
         f.write('foobar')
 
     io = SQLiteIO(tmpfile, view.scene, create_new=False)
-    io.write()
-    result = io.fetchone('SELECT COUNT(*) FROM items')
-    assert result[0] == 1
+    with pytest.raises(BeeFileIOError):
+        io.write()
+    assert open(tmpfile).read() == 'foobar'
 
 
 def test_sqliteio_write_update_recovers_from_nonexisting_file(view, tmpfile):
