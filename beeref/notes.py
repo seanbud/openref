@@ -41,7 +41,7 @@ class NoteEditingMixin:
     def init_note_tools(self):
         self.note_toolbar = NoteToolbar(self.viewport())
         self.note_toolbar.format_requested.connect(self.format_note)
-        self.note_toolbar.appearance_requested.connect(self.style_note)
+        self.note_toolbar.hover_changed.connect(self.refresh_note_tools)
 
     def active_note(self):
         if isinstance(self.scene.edit_item, BeeTextItem):
@@ -61,14 +61,21 @@ class NoteEditingMixin:
         self.actiongroup_set_enabled('active_when_note', note is not None)
         # Ctrl+I means Italic in note context, Insert Images elsewhere.
         actions.actions['insert_images'].qaction.setEnabled(note is None)
-        if note is None or self.active_mode == self.DRAW_MODE:
+        has_selection = (note is not None and note.edit_mode
+                         and note.textCursor().hasSelection())
+        if (note is None or self.active_mode == self.DRAW_MODE
+                or not has_selection):
             self.note_toolbar.hide()
             self.note_toolbar.hide_popovers()
             return
+        cursor = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
+        cursor_scene_pos = self.mapToScene(cursor)
+        hovering_note = note.contains(note.mapFromScene(cursor_scene_pos))
+        if not hovering_note and not self.note_toolbar.is_hovered():
+            self.note_toolbar.hide()
+            return
         state = note.format_state()
-        state['text_width'] = note.textWidth()
         self.note_toolbar.set_state(state)
-        self.note_toolbar.set_appearance(note.appearance)
         rect = self.mapFromScene(note.sceneBoundingRect()).boundingRect()
         self.note_toolbar.reposition_for_rect(rect)
         self.note_toolbar.show()
@@ -77,30 +84,22 @@ class NoteEditingMixin:
     def on_note_editing_changed(self, item, editing):
         self.refresh_note_tools()
 
-    def _note_dimensions(self):
-        try:
-            size = int(self.settings.value('Notes/font_size', 18))
-            width = int(self.settings.value('Notes/text_width', 300))
-        except (TypeError, ValueError):
-            size, width = 18, 300
-        return max(10, min(size, 72)), max(120, min(width, 800))
-
     def create_note(self, position=None, text='', mime=None, mode='auto'):
         self.cancel_active_modes()
-        size, width = self._note_dimensions()
-        item = BeeTextItem(text=text, font_size=size, text_width=width)
+        # Restore the original OpenRef note geometry: a compact ``Text``
+        # label using Qt's default width, padding and font. Editing still
+        # begins immediately, with that label selected for replacement.
+        item = BeeTextItem(text if text else None)
         item.setScale(1 / self.get_scale())
         if position is None:
             local = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
             viewport = self.viewport().rect()
             if not viewport.contains(local):
                 local = viewport.center()
-            x = max(12, min(local.x() + 12, viewport.width() - width - 12))
-            y = max(12, min(local.y() + 12, viewport.height() - size * 3 - 12))
-            position = self.mapToScene(QtCore.QPoint(x, y))
+            position = self.mapToScene(local)
         item.setPos(position)
         self.undo_stack.push(commands.InsertItems(self.scene, [item]))
-        item.enter_edit_mode(select_all=bool(text))
+        item.enter_edit_mode(select_all=True)
         if mime is not None:
             item.paste_mime(mime, mode=mode)
         self.refresh_note_tools()
@@ -118,11 +117,6 @@ class NoteEditingMixin:
         note = self.active_note()
         if note is None:
             return
-        if kind == 'text_width':
-            value = max(120, min(int(value), 800))
-            self.settings.setValue('Notes/text_width', value)
-        if kind == 'font_size':
-            self.settings.setValue('Notes/font_size', int(value))
         note.apply_format(kind, value)
         if note.edit_mode:
             note.setFocus(QtCore.Qt.FocusReason.OtherFocusReason)

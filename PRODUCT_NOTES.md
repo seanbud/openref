@@ -3,11 +3,14 @@
 ## 0.6 — Fast capture and rich notes (in progress)
 
 Images retain native pixel dimensions on paste/import; insertion does not
-change the camera. New notes use a readable 18 logical-pixel font, 300-pixel
-apparent width, and immediate typing focus. Enter inserts a newline, Escape
-commits, and Ctrl/Command+Enter creates the next note below. A contextual
-toolbar adds rich formatting and custom note colors, with Markdown paste,
-document undo while editing, and full board-level undo after editing.
+change the camera. New notes retain OpenRef's original compact ``Text``
+geometry while immediately entering edit mode with that label selected.
+Enter inserts a newline, Escape commits, and Ctrl/Command+Enter creates the
+next note below. Rich controls appear only while hovered text is selected;
+their compact color popover previews changes live and provides shared recent
+and pinned swatches. Markdown paste, document undo while editing, and full
+board-level undo after editing remain supported. Selecting a covered item
+also records its resulting layer promotion as an Undo/Redo operation.
 
 Native boards use `.openref`. `.bee` imports preserve the original and save
 as a new `.openref` copy. Rich content and note appearance must survive copy,

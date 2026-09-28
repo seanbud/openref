@@ -704,7 +704,8 @@ def test_on_action_insert_text(view):
     view.on_action_insert_text()
     assert len(view.scene.items()) == 1
     note = view.scene.items()[0]
-    assert note.toPlainText() == ''
+    assert note.toPlainText() == 'Text'
+    assert note.textCursor().selectedText() == 'Text'
     assert note.isSelected() is True
     assert note.edit_mode is True
     view.cancel_active_modes.assert_called_once_with()

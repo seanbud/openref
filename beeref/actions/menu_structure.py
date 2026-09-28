@@ -82,7 +82,7 @@ menu_structure = [
     {
         'menu': '&Text',
         'items': ['note_bold', 'note_italic', 'note_underline', 'note_strike',
-                  MENU_SEPARATOR, 'note_color', 'note_appearance'],
+                  MENU_SEPARATOR, 'note_color'],
     },
     {
         'menu': '&Transform',

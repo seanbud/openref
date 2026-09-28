@@ -75,9 +75,11 @@ def test_raise_to_top(view):
     view.scene.cancel_crop_mode = MagicMock()
 
     view.scene.raise_to_top()
-    assert item1.zValue() == 0.11 + view.scene.Z_STEP
+    assert item1.zValue() == 0.07 + 2 * view.scene.Z_STEP
     assert item2.zValue() == 0.07 + view.scene.Z_STEP
     assert item3.zValue() == 0.07
+    view.undo_stack.undo()
+    assert (item1.zValue(), item2.zValue()) == (0.06, 0.02)
     view.scene.cancel_crop_mode.assert_called_once_with()
 
 
@@ -96,9 +98,11 @@ def test_lower_to_bottom(view):
     view.scene.cancel_crop_mode = MagicMock()
 
     view.scene.lower_to_bottom()
-    assert item1.zValue() == -0.11 - view.scene.Z_STEP
+    assert item1.zValue() == -0.07 - 2 * view.scene.Z_STEP
     assert item2.zValue() == -0.07 - view.scene.Z_STEP
     assert item3.zValue() == -0.07
+    view.undo_stack.undo()
+    assert (item1.zValue(), item2.zValue()) == (-0.06, -0.02)
     view.scene.cancel_crop_mode.assert_called_once_with()
 
 

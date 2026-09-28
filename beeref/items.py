@@ -93,10 +93,10 @@ class BeeItemMixin(SelectableMixin):
         return [self]
 
     def on_selected_change(self, value):
-        if (value and self.scene()
-                and not self.scene().has_selection()
-                and not self.scene().active_mode is None):
-            self.bring_to_front()
+        # Layer changes are handled by BeeGraphicsScene after mouse
+        # selection settles, where they can be recorded in the undo stack.
+        # This hook remains for selectable-item compatibility.
+        return None
 
     def update_from_data(self, **kwargs):
         self.save_id = kwargs.get('save_id', self.save_id)
@@ -800,7 +800,10 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         'fill': '#28000000',
         'border_color': '#00000000',
         'border_width': 0,
-        'radius': 8,
+        # Match the original text-card treatment. Rich-note appearance is
+        # still persisted for existing boards, but a new note should start as
+        # the familiar compact square-backed label.
+        'radius': 0,
     }
 
     def __init__(self, text=None, html=None, font_size=None,
@@ -942,12 +945,6 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             max(0, self.appearance['radius'] - inset))
         option.state = QtWidgets.QStyle.StateFlag.State_Enabled
         super().paint(painter, option, widget)
-        if self.edit_mode and not self.toPlainText():
-            painter.setPen(QtGui.QColor(160, 160, 165))
-            alignment = (Qt.AlignmentFlag.AlignTop
-                         | Qt.AlignmentFlag.AlignLeft)
-            painter.drawText(rect.adjusted(4, 2, -4, -2), alignment,
-                             'Type a note…')
         self.paint_selectable(painter, option, widget)
 
     def create_copy(self):

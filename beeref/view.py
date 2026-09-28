@@ -1788,6 +1788,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if self.mouseMoveEventMainControls(event):
             return
         super().mouseMoveEvent(event)
+        self.refresh_note_tools()
 
     def mouseReleaseEvent(self, event):
         if self._right_canvas_pending:
@@ -1840,6 +1841,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if self.mouseReleaseEventMainControls(event):
             return
         super().mouseReleaseEvent(event)
+        self.refresh_note_tools()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

@@ -26,10 +26,11 @@ def test_new_note_accepts_typing_and_multiline_without_another_click(
     qtbot.keyClick(view, Qt.Key.Key_N, CTRL)
     note = view.scene.edit_item
     assert isinstance(note, BeeTextItem)
-    assert note.font().pixelSize() == 18
-    assert note.textWidth() == 300
+    assert note.font().pixelSize() == -1
+    assert note.textWidth() == -1
     assert note.scale() == .5
-    assert note.toPlainText() == ''
+    assert note.toPlainText() == 'Text'
+    assert note.textCursor().selectedText() == 'Text'
     qtbot.keyClicks(view, 'First line')
     qtbot.keyClick(view, Qt.Key.Key_Return)
     qtbot.keyClicks(view, 'Second line')
@@ -70,6 +71,11 @@ def test_next_note_commits_and_aligns_below(view, qtbot):
 def test_toolbar_preserves_selected_text(view, qtbot):
     note = view.create_note(text='Style me')
     assert note.textCursor().selectedText() == 'Style me'
+    view.parent.show()
+    point = view.mapFromScene(note.sceneBoundingRect().center())
+    qtbot.mouseMove(view.viewport(), point)
+    view.refresh_note_tools()
+    assert view.note_toolbar.isVisible()
     qtbot.mouseClick(view.note_toolbar.format_buttons['underline'],
                      Qt.MouseButton.LeftButton)
     assert note.edit_mode
@@ -122,13 +128,22 @@ def test_pasted_image_uses_native_dimensions_without_camera_fit(view, qtbot):
     assert view.transform() == transform
 
 
-def test_note_controls_remain_anchored_after_pan_and_zoom(view):
+def test_note_controls_stay_hidden_without_hover_or_text_selection(view):
     note = view.create_note(text='Anchored')
-    original_size = view.note_toolbar.size()
+    view.parent.show()
+    # Move somewhere outside the note before inspecting hover-only controls.
+    QtGui.QCursor.setPos(view.viewport().mapToGlobal(
+        QtCore.QPoint(view.viewport().width() - 4,
+                      view.viewport().height() - 4)))
+    view.refresh_note_tools()
+    assert not view.note_toolbar.isVisible()
+    cursor = note.textCursor()
+    cursor.clearSelection()
+    note.setTextCursor(cursor)
+    view.refresh_note_tools()
+    assert not view.note_toolbar.isVisible()
     view.zoom(120, QtCore.QPointF(100, 100))
     view.pan(QtCore.QPoint(100, 40))
-    assert view.note_toolbar.size() == original_size
-    assert view.viewport().rect().contains(view.note_toolbar.geometry())
     assert note.edit_mode
 
 
