@@ -85,6 +85,26 @@ def test_toolbar_preserves_selected_text(view, qtbot):
     assert note.toPlainText() == 'Replacement'
 
 
+def test_toolbar_grace_period_keeps_hover_controls_reachable(view, qtbot):
+    note = view.create_note(text='Reachable controls')
+    view.parent.show()
+    qtbot.mouseMove(
+        view.viewport(), view.mapFromScene(note.sceneBoundingRect().center()))
+    view.refresh_note_tools()
+    assert view.note_toolbar.isVisible()
+
+    # Leaving the text starts a short bridge rather than destroying the bar.
+    qtbot.mouseMove(view.viewport(), QtCore.QPoint(
+        view.viewport().width() - 3, view.viewport().height() - 3))
+    view.refresh_note_tools()
+    assert view.note_toolbar.isVisible()
+
+    # Re-entering the bar during that bridge cancels the pending hide.
+    qtbot.mouseMove(view.note_toolbar, view.note_toolbar.rect().center())
+    qtbot.wait(600)
+    assert view.note_toolbar.isVisible()
+
+
 def test_editor_paste_formats_markdown_and_plain_paste_stays_literal(
         view, qtbot):
     note = view.create_note()
@@ -128,13 +148,13 @@ def test_pasted_image_uses_native_dimensions_without_camera_fit(view, qtbot):
     assert view.transform() == transform
 
 
-def test_note_controls_stay_hidden_without_hover_or_text_selection(view):
+def test_note_controls_hide_without_a_text_selection(view, qtbot):
     note = view.create_note(text='Anchored')
     view.parent.show()
     # Move somewhere outside the note before inspecting hover-only controls.
-    QtGui.QCursor.setPos(view.viewport().mapToGlobal(
-        QtCore.QPoint(view.viewport().width() - 4,
-                      view.viewport().height() - 4)))
+    cursor = note.textCursor()
+    cursor.clearSelection()
+    note.setTextCursor(cursor)
     view.refresh_note_tools()
     assert not view.note_toolbar.isVisible()
     cursor = note.textCursor()

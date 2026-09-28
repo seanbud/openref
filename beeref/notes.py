@@ -42,6 +42,11 @@ class NoteEditingMixin:
         self.note_toolbar = NoteToolbar(self.viewport())
         self.note_toolbar.format_requested.connect(self.format_note)
         self.note_toolbar.hover_changed.connect(self.refresh_note_tools)
+        self._note_toolbar_hide_timer = QtCore.QTimer(self)
+        self._note_toolbar_hide_timer.setSingleShot(True)
+        self._note_toolbar_hide_timer.setInterval(550)
+        self._note_toolbar_hide_timer.timeout.connect(
+            self._hide_note_toolbar_after_grace)
 
     def active_note(self):
         if isinstance(self.scene.edit_item, BeeTextItem):
@@ -65,21 +70,45 @@ class NoteEditingMixin:
                          and note.textCursor().hasSelection())
         if (note is None or self.active_mode == self.DRAW_MODE
                 or not has_selection):
+            self._note_toolbar_hide_timer.stop()
             self.note_toolbar.hide()
             self.note_toolbar.hide_popovers()
             return
-        cursor = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
-        cursor_scene_pos = self.mapToScene(cursor)
-        hovering_note = note.contains(note.mapFromScene(cursor_scene_pos))
+        hovering_note = self._pointer_is_over_note(note)
         if not hovering_note and not self.note_toolbar.is_hovered():
-            self.note_toolbar.hide()
+            # A small bridge makes the toolbar reachable: users must be able
+            # to move from selected text into the controls without the strict
+            # text hover condition immediately destroying the target.
+            if self.note_toolbar.isVisible():
+                self._note_toolbar_hide_timer.start()
             return
+        self._note_toolbar_hide_timer.stop()
         state = note.format_state()
         self.note_toolbar.set_state(state)
         rect = self.mapFromScene(note.sceneBoundingRect()).boundingRect()
         self.note_toolbar.reposition_for_rect(rect)
         self.note_toolbar.show()
         self.note_toolbar.raise_()
+
+    def _pointer_is_over_note(self, note):
+        cursor = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
+        cursor_scene_pos = self.mapToScene(cursor)
+        return note.contains(note.mapFromScene(cursor_scene_pos))
+
+    def _hide_note_toolbar_after_grace(self):
+        """Hide only after the cursor had time to reach a sibling overlay."""
+        try:
+            note = self.active_note()
+        except RuntimeError:
+            return
+        has_selection = (note is not None and note.edit_mode
+                         and note.textCursor().hasSelection())
+        if (has_selection and (self._pointer_is_over_note(note)
+                               or self.note_toolbar.is_hovered())):
+            self.refresh_note_tools()
+            return
+        self.note_toolbar.hide()
+        self.note_toolbar.hide_popovers()
 
     def on_note_editing_changed(self, item, editing):
         self.refresh_note_tools()
