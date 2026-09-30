@@ -1,6 +1,6 @@
 from unittest.mock import patch, MagicMock
 
-from PyQt6 import QtCore, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 from beeref.items import BeeTextItem, item_registry
@@ -365,3 +365,41 @@ def test_item_to_clipboard(qapp):
     item = BeeTextItem('foo bar')
     item.copy_to_clipboard(clipboard)
     assert clipboard.text() == 'foo bar'
+
+
+def test_typing_arrow_replaces_only_the_immediate_backspace(qapp):
+    item = BeeTextItem('')
+    item.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
+    item.setFocus()
+    item.setTextCursor(QtGui.QTextCursor(item.document()))
+    dash = QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress, Qt.Key.Key_Minus,
+                           Qt.KeyboardModifier.NoModifier, '-')
+    greater = QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress, Qt.Key.Key_Greater,
+                              Qt.KeyboardModifier.NoModifier, '>')
+    backspace = QtGui.QKeyEvent(QtCore.QEvent.Type.KeyPress,
+                                Qt.Key.Key_Backspace,
+                                Qt.KeyboardModifier.NoModifier)
+
+    item.keyPressEvent(dash)
+    item.keyPressEvent(greater)
+    assert item.toPlainText() == '→'
+    item.keyPressEvent(backspace)
+    assert item.toPlainText() == '->'
+
+
+def test_arrow_backspace_grace_expires_after_another_key(qapp):
+    item = BeeTextItem('')
+    item.setTextInteractionFlags(Qt.TextInteractionFlag.TextEditorInteraction)
+    item.setFocus()
+    item.setTextCursor(QtGui.QTextCursor(item.document()))
+    for key, text in ((Qt.Key.Key_Minus, '-'),
+                      (Qt.Key.Key_Greater, '>'),
+                      (Qt.Key.Key_A, 'a')):
+        item.keyPressEvent(QtGui.QKeyEvent(
+            QtCore.QEvent.Type.KeyPress, key,
+            Qt.KeyboardModifier.NoModifier, text))
+    assert item.toPlainText() == '→a'
+    item.keyPressEvent(QtGui.QKeyEvent(
+        QtCore.QEvent.Type.KeyPress, Qt.Key.Key_Backspace,
+        Qt.KeyboardModifier.NoModifier))
+    assert item.toPlainText() == '→'

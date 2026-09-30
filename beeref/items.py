@@ -819,6 +819,11 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         self.is_editable = True
         self.edit_mode = False
         self._applying_state = False
+        # The cursor position immediately after an automatic ``->`` arrow
+        # replacement. A plain Backspace at this exact point expands it back
+        # to the literal characters; any other editing key clears the grace
+        # state and behaves normally.
+        self._auto_arrow_backspace_position = None
         self._font_size = int(font_size) if font_size is not None else None
         self._text_width = float(text_width) if text_width is not None else -1
         self.appearance = dict(self.DEFAULT_APPEARANCE)
@@ -1178,7 +1183,42 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             self.exit_edit_mode()
             event.accept()
             return
+        if (event.key() == Qt.Key.Key_Backspace
+                and modifiers == Qt.KeyboardModifier.NoModifier
+                and self._auto_arrow_backspace_position
+                == self.textCursor().position()):
+            cursor = self.textCursor()
+            cursor.setPosition(cursor.position() - 1)
+            cursor.setPosition(cursor.position() + 1,
+                               QtGui.QTextCursor.MoveMode.KeepAnchor)
+            cursor.beginEditBlock()
+            cursor.insertText('->')
+            cursor.endEditBlock()
+            self.setTextCursor(cursor)
+            self._auto_arrow_backspace_position = None
+            event.accept()
+            return
+
+        self._auto_arrow_backspace_position = None
         super().keyPressEvent(event)
+        # Do this after Qt has inserted the typed character so we preserve
+        # the active text format and use the document's native undo handling.
+        if (event.text() == '>'
+                and not (modifiers & (Qt.KeyboardModifier.ControlModifier
+                                      | Qt.KeyboardModifier.MetaModifier
+                                      | Qt.KeyboardModifier.AltModifier))):
+            cursor = self.textCursor()
+            position = cursor.position()
+            if (position >= 2
+                    and self.toPlainText()[position - 2:position] == '->'):
+                cursor.setPosition(position - 2)
+                cursor.setPosition(position,
+                                   QtGui.QTextCursor.MoveMode.KeepAnchor)
+                cursor.beginEditBlock()
+                cursor.insertText('→')
+                cursor.endEditBlock()
+                self.setTextCursor(cursor)
+                self._auto_arrow_backspace_position = cursor.position()
 
     def copy_to_clipboard(self, clipboard):
         mime = QtCore.QMimeData()

@@ -244,6 +244,23 @@ def test_click_to_front_keeps_multiselection_order_and_is_one_undo(view):
     assert front.zValue() < back.zValue() < middle.zValue()
 
 
+def test_send_to_back_shortcut_has_deterministic_undo_and_redo(qtbot, view):
+    back, selected, front = [_image(view) for _ in range(3)]
+    back.setZValue(1)
+    selected.setZValue(2)
+    front.setZValue(3)
+    back.setSelected(False)
+    front.setSelected(False)
+    selected.setSelected(True)
+
+    view.on_action_lower_to_bottom()
+    assert selected.zValue() < back.zValue() < front.zValue()
+    view.undo_stack.undo()
+    assert (back.zValue(), selected.zValue(), front.zValue()) == (1, 2, 3)
+    view.undo_stack.redo()
+    assert selected.zValue() < back.zValue() < front.zValue()
+
+
 @patch('beeref.main_controls.sys.platform', 'win32')
 def test_windows_fullscreen_drag_centers_window_at_pointer(view):
     window = view.parent

@@ -745,6 +745,41 @@ def test_on_action_copy_text(clipboard_mock, view, imgfilename3x3):
     view.cancel_active_modes.assert_called_once_with()
 
 
+@patch('PyQt6.QtWidgets.QApplication.clipboard')
+def test_on_action_copy_multiple_items_renders_one_image(clipboard_mock, view):
+    red = QtGui.QImage(12, 8, QtGui.QImage.Format.Format_ARGB32)
+    red.fill(QtGui.QColor('#e84b5f'))
+    blue = QtGui.QImage(10, 8, QtGui.QImage.Format.Format_ARGB32)
+    blue.fill(QtGui.QColor('#4e8cff'))
+    left, right = BeePixmapItem(red), BeePixmapItem(blue)
+    right.setPos(14, 0)
+    view.scene.addItem(left)
+    view.scene.addItem(right)
+    left.setSelected(True)
+    right.setSelected(True)
+    view.cancel_active_modes = MagicMock()
+    mimedata = QtCore.QMimeData()
+    clipboard_mock.return_value.mimeData.return_value = mimedata
+
+    view.on_action_copy()
+
+    copied = clipboard_mock.return_value.setPixmap.call_args.args[0].toImage()
+    assert copied.width() == 24
+    assert copied.height() == 8
+    assert copied.pixelColor(2, 2).name() == '#e84b5f'
+    assert copied.pixelColor(16, 2).name() == '#4e8cff'
+    assert set(view.scene.internal_clipboard) == {left, right}
+    assert mimedata.data('beeref/items') == b'2'
+
+
+def test_frameless_window_has_edge_resize_fallback(main_window):
+    main_window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+    edge = main_window.frameGeometry().topLeft()
+    edges = main_window._resize_edges_at(edge)
+    assert edges & Qt.Edge.LeftEdge
+    assert edges & Qt.Edge.TopEdge
+
+
 @patch('beeref.scene.BeeGraphicsScene.clearSelection')
 @patch('PyQt6.QtGui.QClipboard.image')
 def test_on_action_paste_external_new_scene(

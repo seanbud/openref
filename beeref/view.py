@@ -1207,16 +1207,75 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
     def on_action_insert_text(self):
         self.create_note()
 
+    def _render_selection_to_image(self, items):
+        """Render a selection as one transparent image for the OS clipboard.
+
+        The internal clipboard retains the individual, editable board items.
+        External applications instead receive the visual composition, ordered
+        exactly as it appears on the canvas and without OpenRef's selection
+        affordances.
+        """
+        source = self.scene.itemsBoundingRect(items=items)
+        if source.isNull() or source.isEmpty():
+            return QtGui.QImage()
+
+        # Clipboard images are canvas-resolution exports, not screenshots of
+        # the current zoom. Cap only pathological boards while preserving the
+        # complete composition and its aspect ratio.
+        width = max(1, int(math.ceil(source.width())))
+        height = max(1, int(math.ceil(source.height())))
+        scale = min(1.0, 8192 / max(width, height))
+        target_size = QtCore.QSize(
+            max(1, int(math.ceil(width * scale))),
+            max(1, int(math.ceil(height * scale))))
+        image = QtGui.QImage(
+            target_size, QtGui.QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(QtCore.Qt.GlobalColor.transparent)
+
+        selected = set(items)
+        visibility = {item: item.isVisible() for item in self.scene.items()}
+        selection = {item: item.isSelected() for item in selected}
+        # Rendering the live scene is more faithful than reconstructing each
+        # item and correctly includes vector paths, rich text and transforms.
+        # Hide every non-selection item and briefly deselect selected ones so
+        # neither unrelated board content nor resize handles are rasterized.
+        blocker = QtCore.QSignalBlocker(self.scene)
+        try:
+            for item in visibility:
+                if item not in selected:
+                    item.setVisible(False)
+            for item in selected:
+                item.setSelected(False)
+            painter = QtGui.QPainter(image)
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+            painter.setRenderHint(QtGui.QPainter.RenderHint.TextAntialiasing)
+            self.scene.render(
+                painter, QtCore.QRectF(QtCore.QRect(QtCore.QPoint(),
+                                                    target_size)),
+                source)
+            painter.end()
+        finally:
+            for item, visible in visibility.items():
+                item.setVisible(visible)
+            for item, is_selected in selection.items():
+                item.setSelected(is_selected)
+            del blocker
+        return image
+
     def on_action_copy(self):
         logger.debug('Copying to clipboard...')
         self.cancel_active_modes()
         clipboard = QtWidgets.QApplication.clipboard()
         items = self.scene.selectedItems(user_only=True)
 
-        # At the moment, we can only copy one image to the global
-        # clipboard. (Later, we might create an image of the whole
-        # selection for external copying.)
-        items[0].copy_to_clipboard(clipboard)
+        if not items:
+            return
+        if len(items) == 1:
+            items[0].copy_to_clipboard(clipboard)
+        else:
+            image = self._render_selection_to_image(items)
+            if not image.isNull():
+                clipboard.setPixmap(QtGui.QPixmap.fromImage(image))
 
         # However, we can copy all items to the internal clipboard:
         self.scene.copy_selection_to_internal_clipboard()
