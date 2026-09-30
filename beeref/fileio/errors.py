@@ -21,5 +21,6 @@ IMG_LOADING_ERROR_MSG = (
 
 class BeeFileIOError(Exception):
     def __init__(self, msg, filename):
+        super().__init__(msg)
         self.msg = msg
         self.filename = filename

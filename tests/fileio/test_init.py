@@ -12,7 +12,7 @@ from ..utils import queue2list
 @patch('beeref.fileio.sql.SQLiteIO.write')
 def test_save_bee_create_new_false(write_mock):
     with tempfile.TemporaryDirectory() as dirname:
-        fname = os.path.join(dirname, 'test.bee')
+        fname = os.path.join(dirname, 'test.openref')
         fileio.save_bee(fname, 'myscene', create_new=False)
         write_mock.assert_called_once()
 

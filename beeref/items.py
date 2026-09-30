@@ -20,9 +20,11 @@ text).
 import copy
 from collections import defaultdict
 from functools import cached_property
+from html.parser import HTMLParser
 import logging
 import math
 import os.path
+import re
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
@@ -91,10 +93,10 @@ class BeeItemMixin(SelectableMixin):
         return [self]
 
     def on_selected_change(self, value):
-        if (value and self.scene()
-                and not self.scene().has_selection()
-                and not self.scene().active_mode is None):
-            self.bring_to_front()
+        # Layer changes are handled by BeeGraphicsScene after mouse
+        # selection settles, where they can be recorded in the undo stack.
+        # This hook remains for selectable-item compatibility.
+        return None
 
     def update_from_data(self, **kwargs):
         self.save_id = kwargs.get('save_id', self.save_id)
@@ -639,51 +641,314 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             super().mouseReleaseEvent(event)
 
 
+class _SafeNoteHTML(HTMLParser):
+    """Small, deliberately boring HTML allow-list for pasted notes.
+
+    QTextDocument supports images and resource URLs in HTML.  Notes should be
+    portable data, not a way to make the canvas retrieve arbitrary resources,
+    so images, stylesheets and URL attributes are not copied into the document.
+    """
+
+    TAGS = {
+        'p', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'code',
+        'pre', 'blockquote', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4',
+        'h5', 'h6', 'span', 'font', 'a',
+    }
+    VOID = {'br'}
+    UNSAFE_VOID = {'meta', 'link', 'base', 'img', 'source', 'input'}
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts = []
+        self.stack = []
+        self.drop_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        tag = tag.lower()
+        if self.drop_depth:
+            if tag in self.UNSAFE_VOID:
+                return
+            self.drop_depth += 1
+            return
+        if tag in {'head', 'style', 'script', 'title', 'iframe', 'object'}:
+            self.drop_depth = 1
+            return
+        if tag not in self.TAGS:
+            return
+        attrs = dict(attrs)
+        # Links retain their readable label only.  Allow a text colour, but no
+        # arbitrary CSS (which Qt accepts more broadly than browsers do).
+        if tag == 'span':
+            style = _safe_css_style(attrs.get('style', ''))
+            attrs = {'style': style} if style else {}
+        elif tag == 'font':
+            color = attrs.get('color')
+            attrs = {'color': color} if _valid_color(color) else {}
+        else:
+            attrs = {}
+        attr_text = ''.join(f' {name}="{value}"'
+                            for name, value in attrs.items())
+        # Attribute values have already been restricted to colours.  Qt's
+        # colour grammar contains no quote characters.
+        self.parts.append(f'<{tag}{attr_text}>')
+        self.stack.append(tag)
+
+    def handle_startendtag(self, tag, attrs):
+        self.handle_starttag(tag, attrs)
+        self.handle_endtag(tag)
+
+    def handle_endtag(self, tag):
+        tag = tag.lower()
+        if self.drop_depth:
+            self.drop_depth -= 1
+            return
+        if tag not in self.TAGS or tag not in self.stack:
+            return
+        # Close nested permitted elements up to the matching tag.  Ignored
+        # tags must never affect this stack (e.g. a standalone <img>).
+        while self.stack:
+            opened = self.stack.pop()
+            if opened not in self.VOID:
+                self.parts.append(f'</{opened}>')
+            if opened == tag:
+                break
+
+    def handle_data(self, data):
+        if self.drop_depth:
+            return
+        self.parts.append(data.replace('&', '&amp;').replace('<', '&lt;')
+                          .replace('>', '&gt;'))
+
+    def result(self):
+        # Close only tags that were actually permitted.  This also makes a
+        # malformed clipboard fragment deterministic when serialized later.
+        for tag in reversed(self.stack):
+            if tag not in self.VOID:
+                self.parts.append(f'</{tag}>')
+        return ''.join(self.parts)
+
+
+def _valid_color(value):
+    return bool(value) and QtGui.QColor(value).isValid()
+
+
+def _safe_css_color(style):
+    for declaration in style.split(';'):
+        name, separator, value = declaration.partition(':')
+        if separator and name.strip().lower() == 'color':
+            value = value.strip()
+            if _valid_color(value):
+                return value
+    return None
+
+
+def _safe_css_style(style):
+    """Keep the small inline style vocabulary Qt emits for rich notes."""
+    permitted = []
+    for declaration in style.split(';'):
+        name, separator, value = declaration.partition(':')
+        name, value = name.strip().lower(), value.strip().lower()
+        if not separator:
+            continue
+        if name == 'color' and _valid_color(value):
+            permitted.append(f'color:{value}')
+        elif name == 'font-weight' and (value == 'bold' or value.isdigit()):
+            permitted.append(f'font-weight:{value}')
+        elif name == 'font-style' and value in ('normal', 'italic'):
+            permitted.append(f'font-style:{value}')
+        elif name == 'text-decoration' and value in (
+                'none', 'underline', 'line-through', 'underline line-through'):
+            permitted.append(f'text-decoration:{value}')
+        elif name == 'font-size' and value.endswith(('px', 'pt')):
+            try:
+                if float(value[:-2]) > 0:
+                    permitted.append(f'font-size:{value}')
+            except ValueError:
+                pass
+        elif name == 'font-family' and any(
+                family in value
+                for family in ('monospace', 'courier', 'code')):
+            # Qt exports code spans as a family style instead of <code>.
+            permitted.append('font-family:monospace')
+    return ';'.join(permitted)
+
+
+def _sanitize_note_html(html):
+    parser = _SafeNoteHTML()
+    parser.feed(html or '')
+    parser.close()
+    return parser.result()
+
+
+def _looks_like_markdown(text):
+    return bool(re.search(r'(^|\n)(#{1,6}\s|[-*+]\s|\d+[.)]\s)|'
+                          r'\*\*.+?\*\*|__.+?__|`[^`]+`', text or ''))
+
+
 @register_item
 class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
-    """Class for text added by the user."""
+    """An editable note with a durable rich-text representation.
+
+    ``text`` remains the plain-text compatibility field.  New notes also save
+    sanitized HTML, dimensions and the card appearance so their document can
+    round-trip without depending on Qt's current default style.
+    """
 
     TYPE = 'text'
+    DEFAULT_APPEARANCE = {
+        # QColor's eight-digit hexadecimal form is #AARRGGBB.
+        'fill': '#28000000',
+        'border_color': '#00000000',
+        'border_width': 0,
+        # Match the original text-card treatment. Rich-note appearance is
+        # still persisted for existing boards, but a new note should start as
+        # the familiar compact square-backed label.
+        'radius': 0,
+    }
 
-    def __init__(self, text=None, **kwargs):
-        super().__init__(text or "Text")
+    def __init__(self, text=None, html=None, font_size=None,
+                 text_width=None, appearance=None, **kwargs):
+        # Keep old construction semantics for code and old files that only
+        # supplied a text field.  New-note callers explicitly provide a font
+        # size, width and an empty text string.
+        legacy = font_size is None and text_width is None and html is None
+        super().__init__()
         self.save_id = None
-        logger.debug(f'Initialized {self}')
         self.is_image = False
         self.init_selectable()
         self.is_editable = True
         self.edit_mode = False
+        self._applying_state = False
+        self._font_size = int(font_size) if font_size is not None else None
+        self._text_width = float(text_width) if text_width is not None else -1
+        self.appearance = dict(self.DEFAULT_APPEARANCE)
+        self.appearance.update(appearance or {})
+        self._normalize_appearance()
         self.setDefaultTextColor(QtGui.QColor(*COLORS['Scene:Text']))
+        self.document().contentsChanged.connect(self._document_changed)
+        if self._font_size is not None:
+            self._set_default_font_size(self._font_size)
+        self.setTextWidth(self._text_width)
+        if html is not None:
+            self.document().setHtml(_sanitize_note_html(html))
+        else:
+            initial_text = 'Text' if text is None and legacy else text
+            self.setPlainText(initial_text or '')
+        logger.debug(f'Initialized {self}')
 
     @classmethod
     def create_from_data(cls, **kwargs):
-        data = kwargs.get('data', {})
-        item = cls(**data)
-        return item
+        return cls(**kwargs.get('data', {}))
 
     def __str__(self):
-        txt = self.toPlainText()[:40]
-        return (f'Text "{txt}"')
+        return f'Text "{self.toPlainText()[:40]}"'
+
+    @property
+    def font_size(self):
+        return self._font_size
+
+    @property
+    def text_width(self):
+        return self._text_width
+
+    def _normalize_appearance(self):
+        self.appearance = self._normalized_appearance(self.appearance)
+
+    @classmethod
+    def _normalized_appearance(cls, appearance):
+        appearance = dict(cls.DEFAULT_APPEARANCE, **(appearance or {}))
+        for name in ('fill', 'border_color'):
+            value = appearance.get(name)
+            if not _valid_color(value):
+                appearance[name] = cls.DEFAULT_APPEARANCE[name]
+            else:
+                color = QtGui.QColor(value)
+                name_format = (QtGui.QColor.NameFormat.HexRgb
+                               if color.alpha() == 255
+                               else QtGui.QColor.NameFormat.HexArgb)
+                appearance[name] = color.name(name_format)
+        appearance['border_width'] = max(
+            0, float(appearance.get('border_width', 0)))
+        appearance['radius'] = max(0, float(appearance.get('radius', 0)))
+        return appearance
+
+    def _apply_appearance(self, appearance):
+        self.prepareGeometryChange()
+        self.appearance = self._normalized_appearance(appearance)
+        self.update()
+
+    def _set_default_font_size(self, size):
+        font = self.document().defaultFont()
+        font.setPixelSize(int(size))
+        self.document().setDefaultFont(font)
+
+    def setTextWidth(self, width):
+        self.prepareGeometryChange()
+        self._text_width = float(width)
+        super().setTextWidth(self._text_width)
+        self.update()
+
+    def text_state(self):
+        return {
+            'text': self.toPlainText(),
+            'html': self.document().toHtml(),
+            'font_size': self._font_size,
+            'text_width': self._text_width,
+            'appearance': copy.deepcopy(self.appearance),
+        }
+
+    def set_text_state(self, state):
+        """Apply a complete rich-note state without adding history."""
+        state = dict(state)
+        self._applying_state = True
+        self.prepareGeometryChange()
+        try:
+            self._font_size = state.get('font_size')
+            if self._font_size is not None:
+                self._font_size = int(self._font_size)
+                self._set_default_font_size(self._font_size)
+            self._apply_appearance(state.get('appearance'))
+            self.setTextWidth(state.get('text_width', -1))
+            if state.get('text', None) == '':
+                # QTextDocument's HTML exporter represents an empty document
+                # as a paragraph/newline.  Keep the plain fallback exactly
+                # empty so placeholder/removal semantics remain stable.
+                self.setPlainText('')
+            elif state.get('html') is not None:
+                self.document().setHtml(_sanitize_note_html(state['html']))
+            else:
+                self.setPlainText(state.get('text', ''))
+        finally:
+            self._applying_state = False
+        self.update()
 
     def get_extra_save_data(self):
-        return {'text': self.toPlainText()}
+        return self.text_state()
 
     def contains(self, point):
         return self.boundingRect().contains(point)
 
     def paint(self, painter, option, widget):
-        painter.setPen(Qt.PenStyle.NoPen)
-        color = QtGui.QColor(0, 0, 0)
-        color.setAlpha(40)
-        brush = QtGui.QBrush(color)
-        painter.setBrush(brush)
-        painter.drawRect(QtWidgets.QGraphicsTextItem.boundingRect(self))
+        rect = QtWidgets.QGraphicsTextItem.boundingRect(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
+        painter.setBrush(QtGui.QColor(self.appearance['fill']))
+        border_width = self.appearance['border_width']
+        if border_width:
+            painter.setPen(QtGui.QPen(
+                QtGui.QColor(self.appearance['border_color']), border_width))
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
+        inset = border_width / 2
+        painter.drawRoundedRect(
+            rect.adjusted(inset, inset, -inset, -inset),
+            max(0, self.appearance['radius'] - inset),
+            max(0, self.appearance['radius'] - inset))
         option.state = QtWidgets.QStyle.StateFlag.State_Enabled
         super().paint(painter, option, widget)
         self.paint_selectable(painter, option, widget)
 
     def create_copy(self):
-        item = BeeTextItem(self.toPlainText())
+        item = BeeTextItem(**self.text_state())
         item.setPos(self.pos())
         item.setZValue(self.zValue())
         item.setScale(self.scale())
@@ -692,49 +957,234 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             item.do_flip()
         return item
 
-    def enter_edit_mode(self):
+    def _view(self):
+        scene = self.scene()
+        return scene.views()[0] if scene and scene.views() else None
+
+    def _editing_changed(self, editing):
+        view = self._view()
+        callback = getattr(view, 'on_note_editing_changed', None)
+        if callback:
+            callback(self, editing)
+
+    def _document_changed(self):
+        self.prepareGeometryChange()
+        self.update()
+        if self.edit_mode and not self._applying_state:
+            self._editing_changed(True)
+
+    def enter_edit_mode(self, select_all=False):
         logger.debug(f'Entering edit mode on {self}')
+        if self.edit_mode:
+            return
         self.edit_mode = True
-        self.old_text = self.toPlainText()
+        self.old_text_state = self.text_state()
+        # Old integrations inspected this field directly.
+        self.old_text = self.old_text_state['text']
         self.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextEditorInteraction)
-        self.scene().edit_item = self
+        scene = self.scene()
+        if scene:
+            scene.edit_item = self
+        cursor = self.textCursor()
+        if select_all:
+            cursor.select(QtGui.QTextCursor.SelectionType.Document)
+        else:
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        self.setTextCursor(cursor)
+        self.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._editing_changed(True)
 
     def exit_edit_mode(self, commit=True):
         logger.debug(f'Exiting edit mode on {self}')
+        if not self.edit_mode:
+            return
+        scene = self.scene()
+        old_state = getattr(self, 'old_text_state', None)
+        if old_state is None:
+            # Compatibility for older callers that manually set edit_mode.
+            old_state = self.text_state()
+            old_state['text'] = getattr(self, 'old_text', old_state['text'])
+            old_state.pop('html', None)
+        new_state = self.text_state()
         self.edit_mode = False
-        # reset selection:
         self.setTextCursor(QtGui.QTextCursor(self.document()))
         self.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
-        self.scene().edit_item = None
-        if commit:
+        if scene:
+            scene.edit_item = None
+        self._editing_changed(False)
+        if not commit:
+            self.set_text_state(old_state)
+            return
+        if scene and (new_state != old_state or not new_state['text'].strip()):
+            scene.undo_stack.push(commands.ChangeText(
+                self, new_state, old_state,
+                remove_when_empty=not new_state['text'].strip()))
+
+    def set_appearance(self, **kwargs):
+        invalid = set(kwargs) - set(self.DEFAULT_APPEARANCE)
+        if invalid:
+            raise ValueError(
+                f'Unknown note appearance fields: {sorted(invalid)}')
+        before = self.text_state()
+        after = copy.deepcopy(before)
+        after['appearance'] = self._normalized_appearance(
+            dict(after['appearance'], **kwargs))
+        if self.edit_mode or self.scene() is None:
+            # Do not replace the document while editing: it would lose the
+            # active selection and QTextDocument's native undo history.
+            self._apply_appearance(after['appearance'])
+        elif after != before:
             self.scene().undo_stack.push(
-                commands.ChangeText(self, self.toPlainText(), self.old_text))
-            if not self.toPlainText().strip():
-                logger.debug('Removing empty text item')
+                commands.ChangeText(self, after, before))
+
+    def apply_format(self, kind, value=None):
+        if kind == 'text_width':
+            if value is None or not 120 <= float(value) <= 800:
+                raise ValueError('text_width must be between 120 and 800')
+            before = self.text_state()
+            after = copy.deepcopy(before)
+            after['text_width'] = float(value)
+            if self.edit_mode or self.scene() is None:
+                self.setTextWidth(after['text_width'])
+            elif after != before:
                 self.scene().undo_stack.push(
-                    commands.DeleteItems(self.scene(), [self]))
+                    commands.ChangeText(self, after, before))
+            return
+
+        before = self.text_state()
+        cursor = self.textCursor()
+        if not self.edit_mode:
+            cursor.select(QtGui.QTextCursor.SelectionType.Document)
+        if kind == 'bold':
+            if value is None:
+                value = (cursor.charFormat().fontWeight()
+                         < QtGui.QFont.Weight.Bold)
+            value = bool(value)
+            fmt = QtGui.QTextCharFormat()
+            fmt.setFontWeight(QtGui.QFont.Weight.Bold if value
+                              else QtGui.QFont.Weight.Normal)
+        elif kind == 'italic':
+            value = (not cursor.charFormat().fontItalic()
+                     if value is None else bool(value))
+            fmt = QtGui.QTextCharFormat()
+            fmt.setFontItalic(value)
+        elif kind == 'underline':
+            value = (not cursor.charFormat().fontUnderline()
+                     if value is None else bool(value))
+            fmt = QtGui.QTextCharFormat()
+            fmt.setFontUnderline(value)
+        elif kind == 'strike':
+            value = (not cursor.charFormat().fontStrikeOut()
+                     if value is None else bool(value))
+            fmt = QtGui.QTextCharFormat()
+            fmt.setFontStrikeOut(value)
+        elif kind == 'color':
+            if not _valid_color(value):
+                raise ValueError('color must be a valid QColor value')
+            fmt = QtGui.QTextCharFormat()
+            fmt.setForeground(QtGui.QColor(value))
+        elif kind == 'font_size':
+            if value is None or float(value) <= 0:
+                raise ValueError('font_size must be positive')
+            size = int(float(value))
+            fmt = QtGui.QTextCharFormat()
+            fmt.setProperty(QtGui.QTextFormat.Property.FontPixelSize, size)
         else:
-            self.setPlainText(self.old_text)
+            raise ValueError(f'Unknown note format: {kind}')
+
+        cursor.mergeCharFormat(fmt)
+        self.setTextCursor(cursor)
+        if kind == 'font_size':
+            self._font_size = size
+            self._set_default_font_size(size)
+        self.update()
+        if not self.edit_mode and self.scene() is not None:
+            after = self.text_state()
+            if after != before:
+                self.scene().undo_stack.push(
+                    commands.ChangeText(self, after, before))
+
+    def format_state(self):
+        fmt = self.textCursor().charFormat()
+        foreground = (fmt.foreground().color()
+                      if fmt.foreground().style() != Qt.BrushStyle.NoBrush
+                      else self.defaultTextColor())
+        size = fmt.font().pixelSize()
+        return {
+            'bold': fmt.fontWeight() >= QtGui.QFont.Weight.Bold,
+            'italic': fmt.fontItalic(),
+            'underline': fmt.fontUnderline(),
+            'strike': fmt.fontStrikeOut(),
+            'color': foreground.name() if foreground.isValid() else None,
+            # Legacy text items have a point-sized Qt default rather than a
+            # logical pixel size.  The toolbar still needs a usable value.
+            'font_size': size if size > 0 else (self._font_size or 18),
+        }
+
+    def paste_mime(self, mime, mode='auto'):
+        if mode not in ('auto', 'plain', 'markdown'):
+            raise ValueError('mode must be auto, plain, or markdown')
+        if isinstance(mime, QtCore.QMimeData):
+            html = mime.html() if mime.hasHtml() else None
+            text = mime.text() if mime.hasText() else ''
+            markdown = (
+                bytes(mime.data('text/markdown')).decode('utf-8', 'replace')
+                if mime.hasFormat('text/markdown') else None)
+        elif isinstance(mime, dict):
+            html, text = mime.get('html'), mime.get('text', '')
+            markdown = mime.get('markdown')
+        else:
+            html, text, markdown = None, str(mime), None
+        if mode == 'plain':
+            self.textCursor().insertText(text)
+        elif (mode == 'markdown' or (mode == 'auto' and markdown is not None)
+              or (mode == 'auto' and not html and _looks_like_markdown(text))):
+            document = QtGui.QTextDocument()
+            features = (
+                QtGui.QTextDocument.MarkdownFeature.MarkdownDialectGitHub)
+            no_html = getattr(QtGui.QTextDocument.MarkdownFeature,
+                              'MarkdownNoHTML', None)
+            if no_html is not None:
+                features |= no_html
+            document.setMarkdown(markdown if markdown is not None else text,
+                                 features)
+            self.textCursor().insertHtml(
+                _sanitize_note_html(document.toHtml()))
+        elif html:
+            self.textCursor().insertHtml(_sanitize_note_html(html))
+        else:
+            self.textCursor().insertText(text)
 
     def has_selection_handles(self):
         return super().has_selection_handles() and not self.edit_mode
 
     def keyPressEvent(self, event):
+        modifiers = event.modifiers()
         if (event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return)
-                and event.modifiers() == Qt.KeyboardModifier.NoModifier):
+                and modifiers & (Qt.KeyboardModifier.ControlModifier
+                                 | Qt.KeyboardModifier.MetaModifier)):
             self.exit_edit_mode()
+            view = self._view()
+            create_below = getattr(view, 'create_note_below', None)
+            if create_below:
+                create_below(self)
             event.accept()
             return
+        # Enter is a normal rich-text newline. Escape is a convenient commit,
+        # not a cancellation, so an editing session maps to board undo once.
         if (event.key() == Qt.Key.Key_Escape
-                and event.modifiers() == Qt.KeyboardModifier.NoModifier):
-            self.exit_edit_mode(commit=False)
+                and modifiers == Qt.KeyboardModifier.NoModifier):
+            self.exit_edit_mode()
             event.accept()
             return
         super().keyPressEvent(event)
 
     def copy_to_clipboard(self, clipboard):
-        clipboard.setText(self.toPlainText())
+        mime = QtCore.QMimeData()
+        mime.setText(self.toPlainText())
+        mime.setHtml(self.document().toHtml())
+        clipboard.setMimeData(mime)
 
 
 @register_item

@@ -1,5 +1,6 @@
-USER_VERSION = 3
-APPLICATION_ID = 2060242126
+USER_VERSION = 4
+APPLICATION_ID = 0x4F524546  # OREF
+LEGACY_APPLICATION_ID = 2060242126
 
 
 SCHEMA = [
@@ -43,6 +44,8 @@ SCHEMA = [
 
 
 MIGRATIONS = {
+    # Rich note payloads use the existing JSON column.
+    4: [],
     2: [
         "ALTER TABLE items ADD COLUMN data JSON",
         "UPDATE items SET data = json_object('filename', filename)",

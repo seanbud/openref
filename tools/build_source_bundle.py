@@ -16,7 +16,7 @@ PYPI_SOURCES = {
     'exif': '1.6.0',
     'lxml': '5.1.0',
     'plum-py': '0.8.7',
-    'PyQt6': '6.7.0',
+    'PyQt6': '6.7.1',
     'PyQt6-sip': '13.12.0',
     'rectangle-packer': '2.0.2',
     'pyinstaller': '6.6.0',
@@ -24,15 +24,15 @@ PYPI_SOURCES = {
 DIRECT_SOURCES = {
     'Python-3.11.9.tgz':
         'https://www.python.org/ftp/python/3.11.9/Python-3.11.9.tgz',
-    'qtbase-everywhere-src-6.7.0.tar.xz':
-        'https://download.qt.io/archive/qt/6.7/6.7.0/submodules/'
-        'qtbase-everywhere-src-6.7.0.tar.xz',
-    'qtimageformats-everywhere-src-6.7.0.tar.xz':
-        'https://download.qt.io/archive/qt/6.7/6.7.0/submodules/'
-        'qtimageformats-everywhere-src-6.7.0.tar.xz',
-    'qtsvg-everywhere-src-6.7.0.tar.xz':
-        'https://download.qt.io/archive/qt/6.7/6.7.0/submodules/'
-        'qtsvg-everywhere-src-6.7.0.tar.xz',
+    'qtbase-everywhere-src-6.7.1.tar.xz':
+        'https://download.qt.io/archive/qt/6.7/6.7.1/submodules/'
+        'qtbase-everywhere-src-6.7.1.tar.xz',
+    'qtimageformats-everywhere-src-6.7.1.tar.xz':
+        'https://download.qt.io/archive/qt/6.7/6.7.1/submodules/'
+        'qtimageformats-everywhere-src-6.7.1.tar.xz',
+    'qtsvg-everywhere-src-6.7.1.tar.xz':
+        'https://download.qt.io/archive/qt/6.7/6.7.1/submodules/'
+        'qtsvg-everywhere-src-6.7.1.tar.xz',
 }
 
 

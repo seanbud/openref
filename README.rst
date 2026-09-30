@@ -24,7 +24,13 @@ Highlights
   Warm Paper—and place drawing controls in any canvas corner.
 * Keep an expanding visual workspace around content, then trim it explicitly
   with Fit Canvas.
-* Save complete boards as portable ``.bee`` files.
+* Save complete boards as portable native SQLite ``.openref`` files. Legacy
+  ``.bee`` boards remain importable/openable; the first save creates an
+  ``.openref`` copy and leaves the original ``.bee`` unchanged.
+* Create rich notes with bold, italic, underline, and strikethrough text,
+  including plain-text paste when formatting should be discarded.
+* Insert reference images at their native size; OpenRef does not alter the
+  source image or automatically fit the camera when an image is inserted.
 
 Install
 -------

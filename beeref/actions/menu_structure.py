@@ -46,6 +46,8 @@ menu_structure = [
             'cut',
             'copy',
             'paste',
+            'paste_plain',
+            'paste_markdown',
             'delete',
             MENU_SEPARATOR,
             'raise_to_top',
@@ -78,6 +80,11 @@ menu_structure = [
         ],
     },
     {
+        'menu': '&Text',
+        'items': ['note_bold', 'note_italic', 'note_underline', 'note_strike',
+                  MENU_SEPARATOR, 'note_color'],
+    },
+    {
         'menu': '&Transform',
         'items': [
             'crop',
@@ -85,6 +92,7 @@ menu_structure = [
             'flip_vertically',
             MENU_SEPARATOR,
             'reset_scale',
+            'size_selection_to_view',
             'reset_rotation',
             'reset_flip',
             'reset_crop',

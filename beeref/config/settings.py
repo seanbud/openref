@@ -32,10 +32,11 @@ parser.add_argument(
     'filenames',
     nargs='*',
     default=None,
-    help=('Bee file or images to open. '
-          'If the first file is a bee file, it will be opened and all '
+    help=('OpenRef (.openref) or legacy BeeRef (.bee) board, or images '
+          'to open. '
+          'If the first file is a board, it will be opened and all '
           'further files will be ignored. If the first argument isn\'t a '
-          'bee file, all files will be treated as images and inserted as '
+          'board, all files will be treated as images and inserted as '
           'if opened with "Insert -> Images".'))
 parser.add_argument(
     '--settings-dir',

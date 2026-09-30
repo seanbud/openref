@@ -201,6 +201,10 @@ def test_clicking_image_brings_it_above_other_content(qtbot, view):
     qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton,
                      pos=view.mapFromScene(QtCore.QPointF(50, 40)))
     assert behind.zValue() > front.zValue()
+    view.undo_stack.undo()
+    assert behind.zValue() == 1
+    view.undo_stack.redo()
+    assert behind.zValue() > front.zValue()
 
 
 def test_clicking_drawn_stroke_brings_it_to_front(qtbot, view):
@@ -220,6 +224,24 @@ def test_clicking_drawn_stroke_brings_it_to_front(qtbot, view):
     qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton,
                      pos=view.mapFromScene(QtCore.QPointF(50, 0)))
     assert stroke.zValue() > image.zValue()
+    view.undo_stack.undo()
+    assert stroke.zValue() == 1
+
+
+def test_click_to_front_keeps_multiselection_order_and_is_one_undo(view):
+    back, middle, front = [_image(view) for _ in range(3)]
+    for item, z_value in zip((back, middle, front), (1, 2, 3)):
+        item.setZValue(z_value)
+        item.setSelected(False)
+    back.setSelected(True)
+    middle.setSelected(True)
+
+    assert view.scene.bring_items_to_front([back, middle])
+    assert front.zValue() < back.zValue() < middle.zValue()
+    view.undo_stack.undo()
+    assert (back.zValue(), middle.zValue(), front.zValue()) == (1, 2, 3)
+    view.undo_stack.redo()
+    assert front.zValue() < back.zValue() < middle.zValue()
 
 
 @patch('beeref.main_controls.sys.platform', 'win32')

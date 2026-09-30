@@ -27,7 +27,6 @@ import json
 import logging
 import os
 import pathlib
-import shutil
 import sqlite3
 import tempfile
 
@@ -36,7 +35,8 @@ from PyQt6 import QtCore, QtGui
 from beeref import constants
 from beeref.items import BeePixmapItem, BeeErrorItem
 from .errors import BeeFileIOError, IMG_LOADING_ERROR_MSG
-from .schema import SCHEMA, USER_VERSION, MIGRATIONS, APPLICATION_ID
+from .schema import (SCHEMA, USER_VERSION, MIGRATIONS, APPLICATION_ID,
+                     LEGACY_APPLICATION_ID)
 
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,11 @@ logger = logging.getLogger(__name__)
 def is_bee_file(path):
     """Check whether the file at the given path is a bee file."""
 
-    return os.path.splitext(path)[1] == '.bee'
+    return os.path.splitext(path)[1].lower() in ('.bee', '.openref')
+
+
+def is_legacy_board(path):
+    return os.path.splitext(path)[1].lower() == '.bee'
 
 
 def handle_sqlite_errors(func):
@@ -96,6 +100,8 @@ class SQLiteIO:
             delattr(self, '_tmpdir')
 
     def _establish_connection(self):
+        if not os.path.exists(self.filename) and not self.readonly:
+            self.create_new = True
         if (self.create_new
                 and not self.readonly
                 and os.path.exists(self.filename)):
@@ -106,40 +112,38 @@ class SQLiteIO:
 
         uri = pathlib.Path(self.filename).resolve().as_uri()
         if self.readonly:
-            uri = f'{uri}?mode=rw'
+            uri = f'{uri}?mode=ro'
         self._connection = sqlite3.connect(uri, uri=True)
         self._cursor = self.connection.cursor()
         if not self.create_new:
-            try:
-                self._migrate()
-            except Exception:
-                # Updating a file failed; try creating it from scratch instead
-                logger.exception('Error migrating bee file')
-                self.create_new = True
-                self._establish_connection()
+            self._migrate()
 
     def _migrate(self):
         """Migrate database if necessary."""
 
         version = self.fetchone('PRAGMA user_version')[0]
+        application_id = self.fetchone('PRAGMA application_id')[0]
+        if application_id not in (0, APPLICATION_ID, LEGACY_APPLICATION_ID):
+            raise ValueError('This is not an OpenRef or BeeRef board.')
         logger.debug(f'Found bee file version: {version}')
-        if version >= USER_VERSION:
+        if version > USER_VERSION:
+            raise ValueError(
+                'This board requires a newer version of OpenRef. '
+                'Please update OpenRef to open it.')
+        if version == USER_VERSION:
             logger.debug('Version ok; no migrations necessary')
             return
 
         if self.readonly:
-            try:
-                # See whether file is writable so we can migrate it directly
-                self.ex('PRAGMA application_id=%s' % APPLICATION_ID)
-            except sqlite3.Error:
-                logger.debug('File not writable; use temporary copy instead')
-                self._connection.close()
-                self._tmpdir = tempfile.TemporaryDirectory(
-                    prefix=constants.APPNAME)
-                tmpname = os.path.join(self._tmpdir.name, 'mig.bee')
-                shutil.copyfile(self.filename, tmpname)
-                self._connection = sqlite3.connect(tmpname)
-                self._cursor = self.connection.cursor()
+            # Import/migrate a snapshot, never the user's original board.
+            self._tmpdir = tempfile.TemporaryDirectory(
+                prefix=constants.APPNAME)
+            tmpname = os.path.join(self._tmpdir.name, 'import.openref')
+            migrated = sqlite3.connect(tmpname)
+            self._connection.backup(migrated)
+            self._connection.close()
+            self._connection = migrated
+            self._cursor = migrated.cursor()
 
         self.ex('BEGIN TRANSACTION')
         for i in range(version, USER_VERSION):
@@ -249,21 +253,18 @@ class SQLiteIO:
         if self.readonly:
             raise sqlite3.OperationalError(
                 'Attempt to write to a readonly database')
+        previous_ids = [(item, item.save_id)
+                        for item in self.scene.items_for_save()]
         try:
+            if (not self.create_new and not self.readonly
+                    and not os.path.exists(self.filename)):
+                self.create_new = True
             self.create_schema_on_new()
             self.write_data()
         except Exception:
-            if self.retry:
-                # Trying to recover failed
-                raise
-            else:
-                self.retry = True
-                # Try creating file from scratch and save again
-                logger.exception(
-                    f'Updating to existing file {self.filename} failed')
-                self.create_new = True
-                self._close_connection()
-                self.write()
+            for item, save_id in previous_ids:
+                item.save_id = save_id
+            raise
 
     def write_data(self):
         if hasattr(self.scene, 'used_space_rect'):
@@ -300,9 +301,9 @@ class SQLiteIO:
                     break
         num_deleted = len(to_delete)
         self.delete_items(to_delete)
+        self.connection.commit()
         if num_deleted > 10:
             self.ex('VACUUM')
-        self.connection.commit()
         if self.worker:
             self.worker.finished.emit(self.filename, [])
 

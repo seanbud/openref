@@ -147,21 +147,55 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
     def raise_to_top(self):
         self.cancel_active_modes()
         items = self.selectedItems(user_only=True)
-        z_values = map(lambda i: i.zValue(), items)
-        delta = self.max_z + self.Z_STEP - min(z_values)
-        logger.debug(f'Raise to top, delta: {delta}')
-        for item in items:
-            item.setZValue(item.zValue() + delta)
+        self.bring_items_to_front(items)
 
     def lower_to_bottom(self):
         self.cancel_active_modes()
         items = self.selectedItems(user_only=True)
-        z_values = map(lambda i: i.zValue(), items)
-        delta = self.min_z - self.Z_STEP - max(z_values)
-        logger.debug(f'Lower to bottom, delta: {delta}')
+        self.send_items_to_back(items)
 
-        for item in items:
-            item.setZValue(item.zValue() + delta)
+    def bring_items_to_front(self, items):
+        """Promote an ordered group, with one deterministic undo step."""
+
+        all_items = list(self.items_for_save())
+        selected = [item for item in all_items if item in set(items)]
+        if not selected:
+            return False
+        unselected = [item for item in all_items if item not in selected]
+        # Avoid recording no-op clicks on an already topmost ordered group.
+        if not unselected or min(item.zValue() for item in selected) > max(
+                item.zValue() for item in unselected):
+            return False
+        before = {item: item.zValue() for item in selected}
+        start = max(item.zValue() for item in all_items)
+        after = {
+            item: start + self.Z_STEP * (index + 1)
+            for index, item in enumerate(selected)
+        }
+        logger.debug('Bring %d selected item(s) to front', len(selected))
+        self.undo_stack.push(commands.ChangeZValues(before, after))
+        return True
+
+    def send_items_to_back(self, items):
+        """Lower an ordered group, with one deterministic undo step."""
+
+        all_items = list(self.items_for_save())
+        selected = [item for item in all_items if item in set(items)]
+        if not selected:
+            return False
+        unselected = [item for item in all_items if item not in selected]
+        if not unselected or max(item.zValue() for item in selected) < min(
+                item.zValue() for item in unselected):
+            return False
+        before = {item: item.zValue() for item in selected}
+        start = min(item.zValue() for item in all_items)
+        after = {
+            item: start - self.Z_STEP * (len(selected) - index)
+            for index, item in enumerate(selected)
+        }
+        logger.debug('Send %d selected item(s) to back', len(selected))
+        self.undo_stack.push(commands.ChangeZValues(before, after))
+        return True
 
     def move_selection_one_layer(self, forward=True):
         """Move selected items one place without disturbing their order."""
@@ -470,7 +504,10 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 and item_at_pos is not self.multi_select_item
                 and hasattr(item_at_pos, 'bring_to_front')
                 and item_at_pos.scene() is self):
-            item_at_pos.bring_to_front()
+            # Clicking a covered object is an intentional layer decision,
+            # not merely a transient selection detail. Record it so a board
+            # can replay that visual hierarchy exactly through Undo/Redo.
+            self.bring_items_to_front(self.selectedItems(user_only=True))
 
     def mouseDoubleClickEvent(self, event):
         self.cancel_active_modes()

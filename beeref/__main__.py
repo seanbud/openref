@@ -55,8 +55,12 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
         app.setApplicationName(constants.APPNAME)
         app.setApplicationDisplayName(constants.APPNAME)
         app.setDesktopFileName('org.openref.OpenRef')
-        self.setWindowIcon(BeeAssets().logo)
-        app.setWindowIcon(BeeAssets().logo)
+        # Keep the asset owner alive for the lifetime of the native Qt icon.
+        # This avoids a macOS/Qt crash when an icon backed by a short-lived
+        # resource wrapper is handed to QApplication during test startup.
+        self.assets = BeeAssets()
+        self.setWindowIcon(self.assets.logo)
+        app.setWindowIcon(self.assets.logo)
         self.setContentsMargins(1, 1, 1, 1)
         self.view = BeeGraphicsView(app, self)
         default_window_size = QtCore.QSize(500, 300)

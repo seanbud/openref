@@ -14,18 +14,22 @@
 # along with BeeRef.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import os
+import tempfile
+from types import SimpleNamespace
 
 from PyQt6 import QtCore
 
 from beeref import commands
 from beeref.fileio.errors import BeeFileIOError
 from beeref.fileio.image import load_image
-from beeref.fileio.sql import SQLiteIO, is_bee_file
+from beeref.fileio.sql import SQLiteIO, is_bee_file, is_legacy_board
 from beeref.items import BeePixmapItem
 
 
 __all__ = [
     'is_bee_file',
+    'is_legacy_board',
     'load_bee',
     'save_bee',
     'load_images',
@@ -47,8 +51,57 @@ def save_bee(filename, scene, create_new=False, worker=None):
     """Save BeeRef native file."""
     logger.info(f'Saving to file {filename}...')
     logger.debug(f'Create new: {create_new}')
-    io = SQLiteIO(filename, scene, create_new, worker=worker)
-    io.write()
+    if is_legacy_board(filename):
+        error = 'Legacy boards must be saved as a new .openref file.'
+        if worker:
+            worker.finished.emit(filename, [error])
+            return
+        raise BeeFileIOError(msg=error, filename=filename)
+    if not create_new:
+        io = SQLiteIO(filename, scene, worker=worker)
+        io.write()
+        return
+
+    # Build Save As fully before replacing an existing destination. A failed
+    # encode or canceled write must leave the previous file untouched.
+    previous_ids = [(item, item.save_id) for item in scene.items_for_save()]
+    result = []
+    proxy = None
+    if worker:
+        proxy = SimpleNamespace(
+            begin_processing=worker.begin_processing,
+            progress=worker.progress,
+            finished=SimpleNamespace(emit=lambda name, errors:
+                                     result.extend(errors)),
+        )
+        # Forward cancellation dynamically instead of snapshotting its value.
+
+        class SaveProgress:
+            def __getattr__(self, name):
+                return getattr(worker if name == 'canceled' else proxy, name)
+        proxy_worker = SaveProgress()
+    else:
+        proxy_worker = None
+    try:
+        directory = os.path.dirname(os.path.abspath(filename))
+        with tempfile.TemporaryDirectory(prefix='.openref-',
+                                         dir=directory) as scratch:
+            temporary = os.path.join(scratch, 'board.openref')
+            io = SQLiteIO(temporary, scene, True, worker=proxy_worker)
+            io.write()
+            io._close_connection()
+            if result:
+                raise ValueError('; '.join(result))
+            os.replace(temporary, filename)
+    except Exception as error:
+        for item, save_id in previous_ids:
+            item.save_id = save_id
+        if worker:
+            worker.finished.emit(filename, [str(error)])
+            return
+        raise BeeFileIOError(msg=str(error), filename=filename) from error
+    if worker:
+        worker.finished.emit(filename, [])
     logger.info('End save')
 
 

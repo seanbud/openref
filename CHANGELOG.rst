@@ -1,3 +1,35 @@
+0.6.0 beta 1
+============
+
+Added
+-----
+
+* Rich notes support Markdown-aware paste, bold, italic, underline, and
+  strikethrough formatting, with document-aware undo while editing.
+* New boards save in the native ``.openref`` format. Legacy ``.bee`` boards
+  remain openable and are preserved when first saved as an ``.openref`` copy.
+* A compact live text-color popover provides recent and pinned colors.
+
+Changed
+-------
+
+* New notes return to OpenRef's compact ``Text`` label geometry, selected and
+  ready to replace immediately.
+* Text formatting controls appear only for hovered selected text and remain
+  reachable while moving into their toolbar or color popover.
+* Reference images retain their source pixel dimensions when pasted or added.
+* Selecting a covered item promotes it above overlapping content as one
+  deterministic Undo/Redo operation. Arrange commands use the same history.
+
+Fixed
+-----
+
+* The application icon now retains its Qt asset owner, avoiding a native Qt
+  startup crash in repeated GUI test sessions.
+* The color picker avoids covering the selected text and uses a live color
+  circle rather than an underlined text glyph.
+
+
 0.5.0 beta 1
 ============
 
