@@ -322,6 +322,20 @@ class SceneToSVGExporter(SceneExporterBase):
                         'height': str(drawing_rect.height() * item.scale()),
                         'image-rendering': 'optimizeQuality'})
                 pos = pos + drawing_rect.topLeft() * item.scale()
+            if item.TYPE == 'group':
+                frame = item._rect
+                element = ET.Element(
+                    'rect',
+                    attrib={
+                        'width': str(frame.width() * item.scale()),
+                        'height': str(frame.height() * item.scale()),
+                        'fill': 'none',
+                        'stroke': item.frame_color,
+                        'stroke-width': '1.25',
+                        'stroke-dasharray': '5 4',
+                        'rx': '8',
+                        'ry': '8',
+                    })
 
             transforms = []
             if item.flip() == -1:

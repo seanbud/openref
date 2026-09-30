@@ -226,6 +226,20 @@ actions = ActionList([
         group='active_when_selection',
     ),
     Action(
+        id='group_selection',
+        text='&Group Selection',
+        shortcuts=['Ctrl+G'],
+        callback='on_action_group_selection',
+        group='active_when_selection',
+    ),
+    Action(
+        id='toggle_shadow',
+        text='Toggle Drop &Shadow',
+        shortcuts=['Ctrl+Shift+H'],
+        callback='on_action_toggle_shadow',
+        group='active_when_selection',
+    ),
+    Action(
         id='raise_to_top',
         text='Bring to &Front',
         shortcuts=['Up', 'PgUp'],

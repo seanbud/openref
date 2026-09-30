@@ -10,7 +10,8 @@ import pytest
 from beeref.fileio import schema, is_bee_file
 from beeref.fileio.errors import BeeFileIOError
 from beeref.fileio.sql import SQLiteIO
-from beeref.items import BeePixmapItem, BeeTextItem, BeeErrorItem, BeePathItem
+from beeref.items import (BeeErrorItem, BeeGroupItem, BeePathItem,
+                          BeePixmapItem, BeeTextItem)
 
 
 @pytest.mark.parametrize('filename,expected',
@@ -577,6 +578,31 @@ def test_sqliteio_roundtrips_drawing_item(tmpfile, view):
     assert len(loaded) == 1
     assert loaded[0].strokes == strokes
     assert loaded[0].pos() == QtCore.QPointF(12, 34)
+
+
+def test_sqliteio_roundtrips_group_membership(tmpfile, view):
+    first = BeeTextItem('One')
+    second = BeeTextItem('Two')
+    second.setPos(100, 0)
+    view.scene.addItem(first)
+    view.scene.addItem(second)
+    first.setSelected(True)
+    second.setSelected(True)
+    assert view.scene.group_selection()
+    group = next(view.scene.items_by_type('group'))
+    group.title = 'Notes'
+
+    SQLiteIO(tmpfile, view.scene, create_new=True).write()
+    view.scene.clear()
+    SQLiteIO(tmpfile, view.scene, readonly=True).read()
+    view.scene.add_queued_items()
+
+    loaded_groups = list(view.scene.items_by_type('group'))
+    assert len(loaded_groups) == 1
+    assert isinstance(loaded_groups[0], BeeGroupItem)
+    assert loaded_groups[0].title == 'Notes'
+    assert {item.toPlainText() for item in loaded_groups[0].members()} == {
+        'One', 'Two'}
 
 
 def test_sqliteio_read_reads_readonly_pixmap_item(tmpfile, view, imgdata3x3):

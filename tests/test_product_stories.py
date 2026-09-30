@@ -6,7 +6,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
 from beeref.actions import actions
-from beeref.items import BeePathItem, BeePixmapItem, BeeTextItem
+from beeref.items import BeeGroupItem, BeePathItem, BeePixmapItem, BeeTextItem
 
 
 def test_file_dialog_remembers_last_chosen_folder(view, tmp_path):
@@ -259,6 +259,59 @@ def test_send_to_back_shortcut_has_deterministic_undo_and_redo(qtbot, view):
     assert (back.zValue(), selected.zValue(), front.zValue()) == (1, 2, 3)
     view.undo_stack.redo()
     assert selected.zValue() < back.zValue() < front.zValue()
+
+
+def test_group_shortcut_creates_movable_persistent_frame(qtbot, view):
+    left, right = _image(view), _image(view)
+    right.setPos(180, 20)
+    left.setSelected(True)
+    right.setSelected(True)
+
+    qtbot.keyClick(view, Qt.Key.Key_G, Qt.KeyboardModifier.ControlModifier)
+
+    groups = list(view.scene.items_by_type('group'))
+    assert len(groups) == 1
+    group = groups[0]
+    assert isinstance(group, BeeGroupItem)
+    assert set(group.members()) == {left, right}
+    assert group.zValue() < min(left.zValue(), right.zValue())
+    original_left = QtCore.QPointF(left.pos())
+    group.setPos(group.pos() + QtCore.QPointF(20, 12))
+    assert left.pos() == original_left + QtCore.QPointF(20, 12)
+    assert group.get_extra_save_data()['group_id'] == left.group_id
+
+    view.undo_stack.undo()
+    assert not list(view.scene.items_by_type('group'))
+    assert left.group_id is None and right.group_id is None
+    view.undo_stack.redo()
+    assert len(list(view.scene.items_by_type('group'))) == 1
+
+
+def test_drop_shadow_toggles_for_text_and_drawing_with_undo(view):
+    note = BeeTextItem('Depth')
+    stroke = BeePathItem([{
+        'tool': 'line', 'style': 'solid',
+        'color': [255, 255, 255, 255], 'base_size': 2,
+        'points': [{'x': 0, 'y': 0}, {'x': 40, 'y': 0}],
+    }])
+    stroke._update_bounding_rect()
+    view.scene.addItem(note)
+    view.scene.addItem(stroke)
+    note.setSelected(True)
+    stroke.setSelected(True)
+
+    view.on_action_toggle_shadow()
+    assert note.shadow['enabled'] is True
+    assert stroke.shadow['enabled'] is True
+    assert note.graphicsEffect() is not None
+    assert stroke.graphicsEffect() is not None
+
+    view.undo_stack.undo()
+    assert note.shadow['enabled'] is False
+    assert stroke.shadow['enabled'] is False
+    view.undo_stack.redo()
+    assert note.shadow['enabled'] is True
+    assert stroke.shadow['enabled'] is True
 
 
 @patch('beeref.main_controls.sys.platform', 'win32')

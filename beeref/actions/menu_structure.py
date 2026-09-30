@@ -50,6 +50,9 @@ menu_structure = [
             'paste_markdown',
             'delete',
             MENU_SEPARATOR,
+            'group_selection',
+            'toggle_shadow',
+            MENU_SEPARATOR,
             'raise_to_top',
             'lower_to_bottom',
             'move_forward',
@@ -110,6 +113,7 @@ menu_structure = [
     {
         'menu': '&Arrange',
         'items': [
+            'group_selection',
             'raise_to_top',
             'lower_to_bottom',
             'move_forward',
@@ -127,6 +131,7 @@ menu_structure = [
             'draw_mode',
             'set_brush_color',
             'set_brush_size',
+            'toggle_shadow',
         ],
     },
     {

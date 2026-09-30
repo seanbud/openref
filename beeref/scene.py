@@ -52,6 +52,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self.edit_item = None
         self.crop_item = None
         self.settings = BeeSettings()
+        self._syncing_groups = False
         self.clear()
         self._clear_ongoing = False
 
@@ -136,6 +137,32 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self.internal_clipboard = []
         for item in self.selectedItems(user_only=True):
             self.internal_clipboard.append(item)
+
+    def group_selection(self):
+        """Create a persistent frame around two or more selected items."""
+        members = [item for item in self.selectedItems(user_only=True)
+                   if getattr(item, 'TYPE', None) != 'group']
+        if len(members) < 2:
+            return False
+        group = item_registry['group']()
+        group.setZValue(min(item.zValue() for item in members) - self.Z_STEP)
+        self.undo_stack.push(commands.GroupItems(self, group, members))
+        return True
+
+    def toggle_shadows(self):
+        """Toggle the clean default depth treatment on compatible items."""
+        items = [item for item in self.selectedItems(user_only=True)
+                 if getattr(item, 'TYPE', None) in ('text', 'path')]
+        if not items:
+            return None
+        enabled = not all(item.shadow.get('enabled', False) for item in items)
+        before = {item: dict(item.shadow) for item in items}
+        after = {
+            item: dict(item.shadow, enabled=enabled)
+            for item in items
+        }
+        self.undo_stack.push(commands.ChangeShadows(before, after))
+        return enabled
 
     def paste_from_internal_clipboard(self, position):
         copies = []
@@ -651,7 +678,19 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 and self.multi_select_item.active_mode is None):
             self.multi_select_item.fit_selection_area(
                 self.itemsBoundingRect(selection_only=True))
+        self.sync_groups()
         self.expand_used_space()
+
+    def sync_groups(self):
+        """Keep group frames fitted as their member content moves."""
+        if self._syncing_groups:
+            return
+        self._syncing_groups = True
+        try:
+            for group in list(self.items_by_type('group')):
+                group.refresh_bounds()
+        finally:
+            self._syncing_groups = False
 
     def add_item_later(self, itemdata, selected=False):
         """Keep an item for adding later via ``add_queued_items``
@@ -683,3 +722,4 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             if selected:
                 item.setSelected(True)
                 item.bring_to_front()
+        self.sync_groups()

@@ -208,7 +208,7 @@ class SQLiteIO:
             'SELECT items.id, type, x, y, z, scale, rotation, flip, '
             ' items.data, null as data '
             'FROM items '
-            'WHERE items.type IN ("text", "path")'))
+            'WHERE items.type IN ("text", "path", "group")'))
         if self.worker:
             self.worker.begin_processing.emit(len(rows))
 
@@ -313,13 +313,16 @@ class SQLiteIO:
         self.exmany('DELETE FROM sqlar WHERE item_id=?', to_delete)
 
     def insert_item(self, item):
+        data = item.get_extra_save_data()
+        if getattr(item, 'group_id', None):
+            data['group_id'] = item.group_id
         self.ex(
             'INSERT INTO items (type, x, y, z, scale, rotation, flip, '
             'data) '
             'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             (item.TYPE, item.pos().x(), item.pos().y(), item.zValue(),
              item.scale(), item.rotation(), item.flip(),
-             json.dumps(item.get_extra_save_data())))
+             json.dumps(data)))
         item.save_id = self.cursor.lastrowid
 
         if hasattr(item, 'pixmap_to_bytes'):
@@ -336,11 +339,14 @@ class SQLiteIO:
         We only update the item data, not the pixmap data, as pixmap
         data never changes and is also time-consuming to save.
         """
+        data = item.get_extra_save_data()
+        if getattr(item, 'group_id', None):
+            data['group_id'] = item.group_id
         self.ex(
             'UPDATE items SET x=?, y=?, z=?, scale=?, rotation=?, flip=?, '
             'data=? '
             'WHERE id=?',
             (item.pos().x(), item.pos().y(), item.zValue(), item.scale(),
              item.rotation(), item.flip(),
-             json.dumps(item.get_extra_save_data()),
+             json.dumps(data),
              item.save_id))

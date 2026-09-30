@@ -517,6 +517,23 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             commands.DeleteItems(
                 self.scene, self.scene.selectedItems(user_only=True)))
 
+    def on_action_group_selection(self):
+        if self.scene.group_selection():
+            self.show_feedback('Grouped selection', '▢', 'group_selection')
+        else:
+            self.show_feedback('Select two or more items to group', '!',
+                               duration=1800)
+
+    def on_action_toggle_shadow(self):
+        result = self.scene.toggle_shadows()
+        if result is None:
+            self.show_feedback('Select text or a drawing to add depth', '!',
+                               duration=1800)
+        else:
+            self.show_feedback('Drop shadow enabled' if result
+                               else 'Drop shadow disabled', '◒',
+                               'toggle_shadow')
+
     def on_action_raise_to_top(self):
         self.scene.raise_to_top()
         self.show_feedback('Brought selection to front', '↑',

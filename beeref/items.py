@@ -25,6 +25,7 @@ import logging
 import math
 import os.path
 import re
+import uuid
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
@@ -100,6 +101,8 @@ class BeeItemMixin(SelectableMixin):
 
     def update_from_data(self, **kwargs):
         self.save_id = kwargs.get('save_id', self.save_id)
+        self.group_id = kwargs.get('data', {}).get(
+            'group_id', getattr(self, 'group_id', None))
         self.setPos(kwargs.get('x', self.pos().x()),
                     kwargs.get('y', self.pos().y()))
         self.setZValue(kwargs.get('z', self.zValue()))
@@ -805,15 +808,23 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         # the familiar compact square-backed label.
         'radius': 0,
     }
+    DEFAULT_SHADOW = {
+        'enabled': False,
+        'color': '#99000000',
+        'blur': 12.0,
+        'offset_x': 0.0,
+        'offset_y': 5.0,
+    }
 
     def __init__(self, text=None, html=None, font_size=None,
-                 text_width=None, appearance=None, **kwargs):
+                 text_width=None, appearance=None, shadow=None, **kwargs):
         # Keep old construction semantics for code and old files that only
         # supplied a text field.  New-note callers explicitly provide a font
         # size, width and an empty text string.
         legacy = font_size is None and text_width is None and html is None
         super().__init__()
         self.save_id = None
+        self.group_id = None
         self.is_image = False
         self.init_selectable()
         self.is_editable = True
@@ -829,6 +840,8 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         self.appearance = dict(self.DEFAULT_APPEARANCE)
         self.appearance.update(appearance or {})
         self._normalize_appearance()
+        self.shadow = self._normalized_shadow(shadow)
+        self._apply_shadow_effect()
         self.setDefaultTextColor(QtGui.QColor(*COLORS['Scene:Text']))
         self.document().contentsChanged.connect(self._document_changed)
         if self._font_size is not None:
@@ -882,6 +895,34 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         self.appearance = self._normalized_appearance(appearance)
         self.update()
 
+    @classmethod
+    def _normalized_shadow(cls, shadow):
+        shadow = dict(cls.DEFAULT_SHADOW, **(shadow or {}))
+        color = QtGui.QColor(shadow.get('color'))
+        shadow['color'] = color.name(QtGui.QColor.NameFormat.HexArgb)
+        if not color.isValid():
+            shadow['color'] = cls.DEFAULT_SHADOW['color']
+        shadow['enabled'] = bool(shadow.get('enabled', False))
+        shadow['blur'] = max(0.0, float(shadow.get('blur', 12.0)))
+        shadow['offset_x'] = float(shadow.get('offset_x', 0.0))
+        shadow['offset_y'] = float(shadow.get('offset_y', 5.0))
+        return shadow
+
+    def _apply_shadow_effect(self):
+        if not self.shadow['enabled']:
+            self.setGraphicsEffect(None)
+            return
+        effect = QtWidgets.QGraphicsDropShadowEffect()
+        effect.setBlurRadius(self.shadow['blur'])
+        effect.setOffset(self.shadow['offset_x'], self.shadow['offset_y'])
+        effect.setColor(QtGui.QColor(self.shadow['color']))
+        self.setGraphicsEffect(effect)
+
+    def set_shadow(self, shadow):
+        self.shadow = self._normalized_shadow(shadow)
+        self._apply_shadow_effect()
+        self.update()
+
     def _set_default_font_size(self, size):
         font = self.document().defaultFont()
         font.setPixelSize(int(size))
@@ -900,6 +941,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             'font_size': self._font_size,
             'text_width': self._text_width,
             'appearance': copy.deepcopy(self.appearance),
+            'shadow': copy.deepcopy(self.shadow),
         }
 
     def set_text_state(self, state):
@@ -913,6 +955,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
                 self._font_size = int(self._font_size)
                 self._set_default_font_size(self._font_size)
             self._apply_appearance(state.get('appearance'))
+            self.set_shadow(state.get('shadow'))
             self.setTextWidth(state.get('text_width', -1))
             if state.get('text', None) == '':
                 # QTextDocument's HTML exporter represents an empty document
@@ -1237,22 +1280,26 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
     """
 
     TYPE = 'path'
+    DEFAULT_SHADOW = BeeTextItem.DEFAULT_SHADOW
 
-    def __init__(self, strokes=None, **kwargs):
+    def __init__(self, strokes=None, shadow=None, **kwargs):
         super().__init__()
         self.save_id = None
+        self.group_id = None
         self.is_image = False
         self.strokes = copy.deepcopy(strokes or [])
         self.temp_stroke = None
         self.erase_preview_indexes = set()
         self._cached_rect = QtCore.QRectF(0, 0, 1, 1)
         self.init_selectable()
+        self.shadow = BeeTextItem._normalized_shadow(shadow)
+        self._apply_shadow_effect()
         logger.debug(f'Initialized {self}')
 
     @classmethod
     def create_from_data(cls, **kwargs):
         data = kwargs.get('data', {})
-        item = cls(strokes=data.get('strokes', []))
+        item = cls(strokes=data.get('strokes', []), shadow=data.get('shadow'))
         item._update_bounding_rect()
         return item
 
@@ -1261,10 +1308,11 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         return f'Drawing ({n} mark{"s" if n != 1 else ""})'
 
     def get_extra_save_data(self):
-        return {'strokes': self.strokes}
+        return {'strokes': self.strokes, 'shadow': copy.deepcopy(self.shadow)}
 
     def create_copy(self):
-        item = BeePathItem(strokes=copy.deepcopy(self.strokes))
+        item = BeePathItem(strokes=copy.deepcopy(self.strokes),
+                           shadow=copy.deepcopy(self.shadow))
         item.setPos(self.pos())
         item.setZValue(self.zValue())
         item.setScale(self.scale())
@@ -1276,6 +1324,23 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
 
     def contains(self, point):
         return self.shape().contains(point)
+
+    _normalized_shadow = BeeTextItem._normalized_shadow
+
+    def _apply_shadow_effect(self):
+        if not self.shadow['enabled']:
+            self.setGraphicsEffect(None)
+            return
+        effect = QtWidgets.QGraphicsDropShadowEffect()
+        effect.setBlurRadius(self.shadow['blur'])
+        effect.setOffset(self.shadow['offset_x'], self.shadow['offset_y'])
+        effect.setColor(QtGui.QColor(self.shadow['color']))
+        self.setGraphicsEffect(effect)
+
+    def set_shadow(self, shadow):
+        self.shadow = self._normalized_shadow(shadow)
+        self._apply_shadow_effect()
+        self.update()
 
     def bounding_rect_unselected(self):
         rect = QtCore.QRectF(self._cached_rect)
@@ -1503,6 +1568,127 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
     def copy_to_clipboard(self, clipboard):
         image, _ = self.render_to_image()
         clipboard.setImage(image)
+
+
+@register_item
+class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
+    """A lightweight, persistent frame that moves its grouped items."""
+
+    TYPE = 'group'
+    DEFAULT_FRAME_COLOR = '#8d93a8'
+    DEFAULT_LABEL_COLOR = '#c7cad5'
+
+    def __init__(self, group_id=None, title='', frame_color=None,
+                 label_color=None, padding=20.0, **kwargs):
+        super().__init__()
+        self.save_id = None
+        self.group_id = group_id or uuid.uuid4().hex
+        self.is_image = False
+        self.title = str(title or '')
+        self.frame_color = frame_color or self.DEFAULT_FRAME_COLOR
+        self.label_color = label_color or self.DEFAULT_LABEL_COLOR
+        self.padding = max(0.0, float(padding))
+        self._rect = QtCore.QRectF(0, 0, 1, 1)
+        self._refreshing_bounds = False
+        self.init_selectable()
+        self.is_editable = False
+        self.setFlag(
+            QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges)
+
+    @classmethod
+    def create_from_data(cls, **kwargs):
+        data = kwargs.get('data', {})
+        return cls(group_id=data.get('group_id'), title=data.get('title'),
+                   frame_color=data.get('frame_color'),
+                   label_color=data.get('label_color'),
+                   padding=data.get('padding', 20.0))
+
+    def __str__(self):
+        return f'Group "{self.title}"' if self.title else 'Group'
+
+    def boundingRect(self):
+        return self._rect.adjusted(0, -24, 0, 0)
+
+    def bounding_rect_unselected(self):
+        return self.boundingRect()
+
+    def members(self):
+        if self.scene() is None:
+            return []
+        return [item for item in self.scene().items_for_save()
+                if item is not self
+                and getattr(item, 'TYPE', None) != self.TYPE
+                and getattr(item, 'group_id', None) == self.group_id]
+
+    def refresh_bounds(self):
+        members = self.members()
+        if not members:
+            return False
+        rect = self.scene().itemsBoundingRect(items=members).adjusted(
+            -self.padding, -self.padding, self.padding, self.padding)
+        new_rect = QtCore.QRectF(0, 0, rect.width(), rect.height())
+        if self.pos() == rect.topLeft() and self._rect == new_rect:
+            return False
+        self._refreshing_bounds = True
+        self.prepareGeometryChange()
+        try:
+            self.setPos(rect.topLeft())
+            self._rect = new_rect
+        finally:
+            self._refreshing_bounds = False
+        self.update()
+        return True
+
+    def itemChange(self, change, value):
+        if (change == QtWidgets.QGraphicsItem.GraphicsItemChange
+                .ItemPositionChange
+                and not self._refreshing_bounds):
+            delta = value - self.pos()
+            if not delta.isNull():
+                for member in self.members():
+                    member.moveBy(delta.x(), delta.y())
+        return super().itemChange(change, value)
+
+    def has_selection_handles(self):
+        # A group frame is a moveable container, not a transform proxy.
+        return False
+
+    def shape(self):
+        outer = QtGui.QPainterPath()
+        outer.addRect(self._rect)
+        inner = QtGui.QPainterPath()
+        inner.addRect(self._rect.adjusted(6, 6, -6, -6))
+        ring = outer.subtracted(inner)
+        if self.title:
+            ring.addRect(QtCore.QRectF(0, -24, self._rect.width(), 24))
+        return ring
+
+    def paint(self, painter, option, widget):
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        color = QtGui.QColor(self.frame_color)
+        pen = QtGui.QPen(color, 1.25)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(self._rect.adjusted(.625, .625, -.625, -.625),
+                                8, 8)
+        if self.title:
+            painter.setPen(QtGui.QColor(self.label_color))
+            painter.drawText(QtCore.QPointF(2, -8), self.title)
+        self.paint_selectable(painter, option, widget)
+
+    def get_extra_save_data(self):
+        return {'group_id': self.group_id, 'title': self.title,
+                'frame_color': self.frame_color,
+                'label_color': self.label_color, 'padding': self.padding}
+
+    def create_copy(self):
+        item = BeeGroupItem(title=self.title, frame_color=self.frame_color,
+                            label_color=self.label_color,
+                            padding=self.padding)
+        item.setPos(self.pos())
+        item.setZValue(self.zValue())
+        return item
 
 
 @register_item

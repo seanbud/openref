@@ -88,6 +88,55 @@ class ChangeZValues(QtGui.QUndoCommand):
             item.setZValue(z_value)
 
 
+class GroupItems(QtGui.QUndoCommand):
+    """Create one persistent frame and associate its existing members."""
+
+    def __init__(self, scene, group, members):
+        super().__init__('Group items')
+        self.scene = scene
+        self.group = group
+        self.members = list(members)
+        self.previous_group_ids = {
+            item: getattr(item, 'group_id', None) for item in self.members}
+
+    def redo(self):
+        self.scene.deselect_all_items()
+        for item in self.members:
+            item.group_id = self.group.group_id
+        if self.group.scene() is not self.scene:
+            self.scene.addItem(self.group)
+        self.group.refresh_bounds()
+        self.group.setSelected(True)
+
+    def undo(self):
+        self.scene.deselect_all_items()
+        if self.group.scene() is self.scene:
+            self.scene.removeItem(self.group)
+        for item, group_id in self.previous_group_ids.items():
+            item.group_id = group_id
+            item.setSelected(True)
+
+
+class ChangeShadows(QtGui.QUndoCommand):
+    """Apply a saved shadow state without flattening editable items."""
+
+    def __init__(self, before, after):
+        super().__init__('Change drop shadow')
+        self.before = before
+        self.after = after
+
+    @staticmethod
+    def _apply(states):
+        for item, shadow in states.items():
+            item.set_shadow(shadow)
+
+    def redo(self):
+        self._apply(self.after)
+
+    def undo(self):
+        self._apply(self.before)
+
+
 class ResizeItems(QtGui.QUndoCommand):
     """Undoable proportional resize, including a mirror across the anchor."""
 

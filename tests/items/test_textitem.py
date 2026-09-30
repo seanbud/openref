@@ -64,7 +64,8 @@ def test_get_extra_save_data(qapp):
     data = item.get_extra_save_data()
     assert data['text'] == 'foo bar'
     assert set(data) == {
-        'text', 'html', 'font_size', 'text_width', 'appearance'}
+        'text', 'html', 'font_size', 'text_width', 'appearance', 'shadow'}
+    assert data['shadow']['enabled'] is False
 
 
 @patch('beeref.items.BeeTextItem.boundingRect')

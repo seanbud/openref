@@ -26,7 +26,8 @@ def test_path_item_roundtrip_and_copy(qapp):
     item = BeePathItem.create_from_data(data={'strokes': strokes})
     duplicate = item.create_copy()
 
-    assert item.get_extra_save_data() == {'strokes': strokes}
+    assert item.get_extra_save_data()['strokes'] == strokes
+    assert item.get_extra_save_data()['shadow']['enabled'] is False
     assert duplicate.strokes == strokes
     assert duplicate.strokes is not item.strokes
     assert item.bounding_rect_unselected().width() > 40
