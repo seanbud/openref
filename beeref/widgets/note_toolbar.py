@@ -35,10 +35,10 @@ class _NoteColorPopover(QtWidgets.QFrame):
         self._color = QtGui.QColor('#f3f4f6')
 
         self.field = _SaturationValueField(self)
-        self.field.setFixedSize(208, 118)
+        self.field.setFixedSize(178, 96)
         self.field.color_changed.connect(self._field_changed)
         self.hue = _ColorChannel('hue', self)
-        self.hue.setFixedWidth(208)
+        self.hue.setFixedWidth(178)
         self.hue.value_changed.connect(self._hue_changed)
 
         self.swatches = QtWidgets.QWidget(self)
@@ -48,12 +48,12 @@ class _NoteColorPopover(QtWidgets.QFrame):
         self.swatch_layout.setVerticalSpacing(4)
 
         layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 9)
-        layout.setSpacing(7)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
         layout.addWidget(self.field)
         layout.addWidget(self.hue)
         layout.addWidget(self.swatches)
-        self.setFixedWidth(224)
+        self.setFixedWidth(194)
         self._refresh_swatches()
         self.set_color(self._color, emit=False)
         self.hide()
@@ -99,7 +99,7 @@ class _NoteColorPopover(QtWidgets.QFrame):
         for index, value in enumerate(self._colors_for_grid()):
             button = QtWidgets.QToolButton(self.swatches)
             button.setObjectName('noteColorSwatch')
-            button.setFixedSize(32, 20)
+            button.setFixedSize(25, 18)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setStyleSheet(
                 'QToolButton { background: ' + value + '; border: 1px solid '
@@ -160,19 +160,43 @@ class _NoteColorPopover(QtWidgets.QFrame):
         if emit:
             self.color_changed.emit(QtGui.QColor(color))
 
-    def show_at_cursor(self):
+    def show_for(self, anchor, avoid_rect=None):
+        """Place beside a toolbar without obscuring the selected note."""
         parent = self.parentWidget()
         if parent is None:
             return
         self._refresh_swatches()
         self.adjustSize()
-        pos = parent.mapFromGlobal(QtGui.QCursor.pos())
-        x = max(6, min(pos.x() + 12, parent.width() - self.width() - 6))
-        y = pos.y() + 14
-        if y + self.height() > parent.height() - 6:
-            y = pos.y() - self.height() - 14
-        y = max(6, min(y, parent.height() - self.height() - 6))
-        self.move(x, y)
+        anchor_rect = anchor.geometry()
+        width, height = self.width(), self.height()
+        bounds = parent.rect().adjusted(6, 6, -6, -6)
+        candidates = (
+            (anchor_rect.center().x() - width // 2,
+             anchor_rect.top() - height - 7),
+            (anchor_rect.right() + 8,
+             anchor_rect.center().y() - height // 2),
+            (anchor_rect.left() - width - 8,
+             anchor_rect.center().y() - height // 2),
+            (anchor_rect.center().x() - width // 2,
+             anchor_rect.bottom() + 8),
+        )
+        placed = []
+        for x, y in candidates:
+            x = max(bounds.left(), min(x, bounds.right() - width + 1))
+            y = max(bounds.top(), min(y, bounds.bottom() - height + 1))
+            rect = QtCore.QRect(x, y, width, height)
+            placed.append(rect)
+            if avoid_rect is None or not rect.intersects(avoid_rect):
+                self.move(rect.topLeft())
+                break
+        else:
+            # A very small viewport can leave no perfect answer. Pick the
+            # least-overlapping candidate rather than blindly covering text.
+            def overlap(rect):
+                intersection = rect.intersected(avoid_rect)
+                return intersection.width() * intersection.height()
+
+            self.move(min(placed, key=overlap).topLeft())
         self.show()
         self.raise_()
 
@@ -241,7 +265,7 @@ class NoteToolbar(QtWidgets.QFrame):
 
         self.text_color_button = QtWidgets.QToolButton(self)
         self.text_color_button.setObjectName('noteTextColor')
-        self.text_color_button.setText('A')
+        self.text_color_button.setText('●')
         self.text_color_button.setToolTip('Text color')
         self.text_color_button.setFixedSize(27, 24)
         self.text_color_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -266,7 +290,7 @@ class NoteToolbar(QtWidgets.QFrame):
             }
             QToolButton:hover { background: rgba(127, 127, 127, 45); }
             QToolButton:checked { background: rgba(90, 140, 210, 110); }
-            QToolButton#noteTextColor { border-bottom: 3px solid #f3f4f6; }
+            QToolButton#noteTextColor { font-size: 16px; }
         ''')
         self.color_popover.setStyleSheet('''
             QFrame#noteColorPopover {
@@ -279,7 +303,7 @@ class NoteToolbar(QtWidgets.QFrame):
     def _refresh_color_button(self):
         color = QtGui.QColor(self._state['color'])
         self.text_color_button.setStyleSheet(
-            'QToolButton#noteTextColor { border-bottom: 3px solid '
+            'QToolButton#noteTextColor { color: '
             f'{color.name(QtGui.QColor.NameFormat.HexRgb)}; }}')
 
     def _format(self, kind, value):
@@ -302,7 +326,8 @@ class NoteToolbar(QtWidgets.QFrame):
 
     def _choose_text_color(self):
         self.color_popover.set_color(self._state['color'], emit=False)
-        self.color_popover.show_at_cursor()
+        self.color_popover.show_for(
+            self, getattr(self, '_note_rect', None))
 
     def reposition_for_rect(self, note_rect):
         """Place near the selected note, constrained to the viewport."""
@@ -311,6 +336,7 @@ class NoteToolbar(QtWidgets.QFrame):
             return
         self.adjustSize()
         rect = QtCore.QRect(note_rect)
+        self._note_rect = QtCore.QRect(rect)
         x = rect.center().x() - self.width() // 2
         x = max(6, min(x, viewport.width() - self.width() - 6))
         above = rect.top() - self.height() - 6
