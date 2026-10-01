@@ -1,3 +1,20 @@
+0.6.0 beta 3
+============
+
+Changed
+-------
+
+* Drawing performance no longer rebuilds shadow layers or canvas bounds on
+  every pointer repaint.
+* Shared drawing shadows update only when their source geometry changes.
+* Native macOS trackpad pinch zoom is handled consistently across Qt gesture
+  delivery paths.
+
+Fixed
+-----
+
+* Restored pinch-to-zoom on Mac trackpads while preserving mouse-wheel zoom.
+
 0.6.0 beta 2
 ============
 
