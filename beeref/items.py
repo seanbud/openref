@@ -1603,7 +1603,8 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         for index, stroke in enumerate(self.strokes):
             stroker = QtGui.QPainterPathStroker()
             stroker.setWidth(max(8, self._effective_width(stroke) + 4))
-            result.addPath(stroker.createStroke(self._stroke_path_cache[index]))
+            result.addPath(
+                stroker.createStroke(self._stroke_path_cache[index]))
         return result
 
     def paint(self, painter, option, widget):

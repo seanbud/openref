@@ -58,12 +58,11 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
         app.setApplicationName(constants.APPNAME)
         app.setApplicationDisplayName(constants.APPNAME)
         app.setDesktopFileName('org.openref.OpenRef')
-        # Keep the asset owner alive for the lifetime of the native Qt icon.
-        # This avoids a macOS/Qt crash when an icon backed by a short-lived
-        # resource wrapper is handed to QApplication during test startup.
+        # Keep the asset owner alive for the lifetime of the native window
+        # icon. Setting QApplication's global icon is redundant here and
+        # crashes Qt's offscreen Linux plugin after repeated test windows.
         self.assets = BeeAssets()
         self.setWindowIcon(self.assets.logo)
-        app.setWindowIcon(self.assets.logo)
         self.setContentsMargins(1, 1, 1, 1)
         self.view = BeeGraphicsView(app, self)
         default_window_size = QtCore.QSize(500, 300)
