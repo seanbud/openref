@@ -343,6 +343,19 @@ def test_multiple_drawings_share_a_single_shadow_composite(view):
     assert all(item.graphicsEffect() is None for item in drawings)
 
 
+def test_shadow_proxy_follows_only_its_moved_source(view):
+    note = BeeTextItem('Move me')
+    view.scene.addItem(note)
+    note.setSelected(True)
+    view.on_action_toggle_shadow()
+    composite = next(iter(view.scene._shadow_composites.values()))
+    proxy = composite.proxies[note]
+
+    note.setPos(QtCore.QPointF(42, 24))
+
+    assert proxy.pos() == note.pos()
+
+
 @patch('beeref.main_controls.sys.platform', 'win32')
 def test_windows_fullscreen_drag_centers_window_at_pointer(view):
     window = view.parent

@@ -39,17 +39,26 @@ class _ShadowSubjectItem(QtWidgets.QGraphicsItem):
     def __init__(self, target, parent=None):
         super().__init__(parent)
         self.target = target
+        self._state = None
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
         self.sync()
 
-    def sync(self):
+    def sync(self, force=False):
         target = self.target
-        self.prepareGeometryChange()
+        rect = QtCore.QRectF(target.bounding_rect_unselected())
+        state = (QtCore.QPointF(target.pos()), target.scale(),
+                 target.rotation(), QtGui.QTransform(target.transform()),
+                 target.zValue(), rect)
+        if not force and state == self._state:
+            return
+        if self._state is None or rect != self._state[-1]:
+            self.prepareGeometryChange()
         self.setPos(target.pos())
         self.setScale(target.scale())
         self.setRotation(target.rotation())
         self.setTransform(target.transform())
         self.setZValue(target.zValue())
+        self._state = state
         self.update()
 
     def boundingRect(self):
@@ -66,9 +75,10 @@ class _ShadowCompositeItem(QtWidgets.QGraphicsItemGroup):
         super().__init__(parent)
         self.shadow_id = shadow_id
         self.proxies = {}
+        self._effect_state = None
         self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
 
-    def sync(self, members, z_step):
+    def sync(self, members, z_step, force_targets=()):
         members = list(members)
         wanted = set(members)
         for target, proxy in list(self.proxies.items()):
@@ -82,7 +92,7 @@ class _ShadowCompositeItem(QtWidgets.QGraphicsItemGroup):
                 proxy = _ShadowSubjectItem(target)
                 self.addToGroup(proxy)
                 self.proxies[target] = proxy
-            proxy.sync()
+            proxy.sync(force=target in force_targets)
         if not members:
             return
         shadow = members[0].shadow
@@ -90,10 +100,16 @@ class _ShadowCompositeItem(QtWidgets.QGraphicsItemGroup):
         if effect is None:
             effect = QtWidgets.QGraphicsDropShadowEffect()
             self.setGraphicsEffect(effect)
-        effect.setBlurRadius(shadow['blur'])
-        effect.setOffset(shadow['offset_x'], shadow['offset_y'])
-        effect.setColor(QtGui.QColor(shadow['color']))
-        self.setZValue(min(item.zValue() for item in members) - z_step / 2)
+        effect_state = (shadow['blur'], shadow['offset_x'],
+                        shadow['offset_y'], shadow['color'])
+        if effect_state != self._effect_state:
+            effect.setBlurRadius(shadow['blur'])
+            effect.setOffset(shadow['offset_x'], shadow['offset_y'])
+            effect.setColor(QtGui.QColor(shadow['color']))
+            self._effect_state = effect_state
+        z_value = min(item.zValue() for item in members) - z_step / 2
+        if self.zValue() != z_value:
+            self.setZValue(z_value)
 
 
 class BeeGraphicsScene(QtWidgets.QGraphicsScene):
@@ -120,11 +136,15 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._syncing_shadows = False
         self._suppress_shadow_sync = False
         self._shadow_composites = {}
+        self._used_space_refresh_timer = QtCore.QTimer(self)
+        self._used_space_refresh_timer.setSingleShot(True)
+        self._used_space_refresh_timer.timeout.connect(self.expand_used_space)
         self.clear()
         self._clear_ongoing = False
 
     def clear(self):
         self._clear_ongoing = True
+        self._used_space_refresh_timer.stop()
         super().clear()
         self._shadow_composites = {}
         self.used_space_rect = QtCore.QRectF()
@@ -753,8 +773,18 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             self.multi_select_item.fit_selection_area(
                 self.itemsBoundingRect(selection_only=True))
         self.sync_groups()
-        self.sync_shadow_composites()
-        self.expand_used_space()
+        # ``changed`` fires for every paint invalidation. In particular, a
+        # live pen stroke emits it for every pointer event. Geometry is synced
+        # through the explicit item mutation paths below; used-space fitting
+        # is intentionally debounced to avoid an O(item-count) bounds walk at
+        # drawing-frame frequency.
+        self.schedule_used_space_refresh()
+
+    def schedule_used_space_refresh(self):
+        """Refresh persistent canvas bounds after a brief quiet period."""
+
+        if not self._clear_ongoing:
+            self._used_space_refresh_timer.start(120)
 
     def sync_groups(self):
         """Keep group frames fitted as their member content moves."""
@@ -802,6 +832,23 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 composite.sync(members, self.Z_STEP)
         finally:
             self._syncing_shadows = False
+
+    def sync_shadow_for(self, item, force=False):
+        """Synchronize only the composite which visually mirrors ``item``."""
+
+        if self._syncing_shadows or not getattr(item, 'shadow', {}).get(
+                'enabled'):
+            return
+        shadow_id = item.shadow.get('group_id')
+        composite = self._shadow_composites.get(shadow_id)
+        if composite is None:
+            self.sync_shadow_composites()
+            return
+        members = [candidate for candidate in self.items_for_save()
+                   if getattr(candidate, 'shadow', {}).get('enabled')
+                   and candidate.shadow.get('group_id') == shadow_id]
+        composite.sync(members, self.Z_STEP,
+                       force_targets=(item,) if force else ())
 
     def add_item_later(self, itemdata, selected=False):
         """Keep an item for adding later via ``add_queued_items``

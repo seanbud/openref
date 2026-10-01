@@ -1380,6 +1380,8 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         self.strokes.append(copy.deepcopy(stroke))
         self._update_bounding_rect()
         self.update()
+        if self.scene() is not None:
+            self.scene().sync_shadow_for(self, force=True)
 
     def replace_strokes(self, strokes):
         """Replace all marks while keeping geometry notifications correct."""
@@ -1388,6 +1390,8 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         self.strokes = copy.deepcopy(strokes)
         self._update_bounding_rect()
         self.update()
+        if self.scene() is not None:
+            self.scene().sync_shadow_for(self, force=True)
 
     def _rebuild_stroke_cache(self):
         """Cache smoothed paths and broad-phase bounds for hit testing."""

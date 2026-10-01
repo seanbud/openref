@@ -1393,6 +1393,19 @@ def test_on_change_when_no_multi_select(view):
     view.scene.multi_select_item.fit_selection_area.assert_not_called()
 
 
+def test_on_change_defers_expensive_canvas_maintenance(view):
+    view.scene.sync_shadow_composites = MagicMock()
+    view.scene.schedule_used_space_refresh = MagicMock()
+
+    view.scene.on_change(None)
+
+    # A QGraphicsScene repaint can occur for every pen sample. Shadow proxy
+    # synchronization and a full itemsBoundingRect walk must not be on that
+    # hot path.
+    view.scene.sync_shadow_composites.assert_not_called()
+    view.scene.schedule_used_space_refresh.assert_called_once()
+
+
 def test_add_queued_items_unselected(view):
     data = {'type': 'text', 'z': 0.33, 'data': {'text': 'foo'}}
     view.scene.add_item_later(data, selected=False)

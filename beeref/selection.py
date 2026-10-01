@@ -69,6 +69,7 @@ class BaseItemMixin:
         logger.debug(f'Setting scale for {self} to {value}')
         self.prepareGeometryChange()
         super().setScale(value)
+        self._sync_shadow_if_needed()
 
     def setZValue(self, value):
         logger.debug(f'Setting z-value for {self} to {value}')
@@ -76,6 +77,7 @@ class BaseItemMixin:
         if self.scene():
             self.scene().max_z = max(self.scene().max_z, value)
             self.scene().min_z = min(self.scene().min_z, value)
+        self._sync_shadow_if_needed()
 
     def bring_to_front(self):
         self.setZValue(self.scene().max_z + self.scene().Z_STEP)
@@ -84,6 +86,12 @@ class BaseItemMixin:
     def setRotation(self, value):
         logger.debug(f'Setting rotation for {self} to {value}')
         super().setRotation(value % 360)
+        self._sync_shadow_if_needed()
+
+    def _sync_shadow_if_needed(self, force=False):
+        scene = self.scene()
+        if scene is not None and getattr(self, 'shadow', {}).get('enabled'):
+            scene.sync_shadow_for(self, force=force)
 
     def flip(self):
         """Returns the flip value (1 or -1)"""
@@ -151,7 +159,9 @@ class SelectableMixin(BaseItemMixin):
         self.setAcceptHoverEvents(True)
         self.setFlags(
             QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsMovable
-            | QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsSelectable)
+            | QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIsSelectable
+            | QtWidgets.QGraphicsItem.GraphicsItemFlag
+            .ItemSendsGeometryChanges)
 
         self.viewport_scale = 1
         self.active_mode = None
@@ -670,7 +680,10 @@ class SelectableMixin(BaseItemMixin):
             self.prepareGeometryChange()
             if hasattr(self, 'on_selected_change'):
                 self.on_selected_change(value)
-        return super().itemChange(change, value)
+        result = super().itemChange(change, value)
+        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
+            self._sync_shadow_if_needed()
+        return result
 
 
 class MultiSelectItem(SelectableMixin,
