@@ -1,3 +1,27 @@
+0.6.0 beta 2
+============
+
+Added
+-----
+
+* Frames can persistently group selected board items, and text and drawings
+  can receive an undoable drop-shadow treatment.
+
+Changed
+-------
+
+* A shared shadow for multiple selected drawings is now composited as one
+  visual layer, without shadowing selection controls.
+* Erasing large, zoomed-in drawings reuses cached stroke geometry and
+  coalesces redundant pointer updates for smoother interaction.
+
+Fixed
+-----
+
+* The full GUI test matrix is stable on the pinned Linux Qt runtime across
+  Python 3.9 through 3.12.
+
+
 0.6.0 beta 1
 ============
 
