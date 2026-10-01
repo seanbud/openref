@@ -135,6 +135,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._syncing_groups = False
         self._syncing_shadows = False
         self._suppress_shadow_sync = False
+        self._shadow_rendering_suspended = False
         self._shadow_composites = {}
         self._used_space_refresh_timer = QtCore.QTimer(self)
         self._used_space_refresh_timer.setSingleShot(True)
@@ -832,6 +833,33 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 composite.sync(members, self.Z_STEP)
         finally:
             self._syncing_shadows = False
+
+    def suspend_shadow_rendering(self):
+        """Hide expensive shadow composites during transient view zooming.
+
+        Zoom gestures can generate many repaints while the view transform is
+        changing.  Drop-shadow effects are blur passes over the full source
+        layer, so keeping them visible during that short interaction makes
+        panning/zooming feel disproportionately expensive.  The editable
+        board items remain visible; only the decorative proxy layer is
+        suspended until the gesture settles.
+        """
+
+        if self._shadow_rendering_suspended:
+            return
+        self._shadow_rendering_suspended = True
+        for composite in self._shadow_composites.values():
+            composite.setVisible(False)
+
+    def resume_shadow_rendering(self):
+        """Restore shadow composites after a zoom gesture has settled."""
+
+        if not self._shadow_rendering_suspended:
+            return
+        self._shadow_rendering_suspended = False
+        for composite in self._shadow_composites.values():
+            composite.setVisible(True)
+            composite.update()
 
     def sync_shadow_for(self, item, force=False):
         """Synchronize only the composite which visually mirrors ``item``."""

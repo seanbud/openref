@@ -111,6 +111,11 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self._fullscreen_anchor_timer.setSingleShot(True)
         self._fullscreen_anchor_timer.timeout.connect(
             self._clear_fullscreen_anchor)
+        self._zoom_settle_timer = QtCore.QTimer(self)
+        self._zoom_settle_timer.setSingleShot(True)
+        self._zoom_settle_timer.setInterval(140)
+        self._zoom_settle_timer.timeout.connect(self._finish_zoom_interaction)
+        self._zoom_interaction_active = False
         self.window_position_locked = False
         self._recalculating_scene_rect = False
 
@@ -1603,11 +1608,28 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         factor = target / current
         if abs(factor - 1) < 1e-12:
             return
+        self._begin_zoom_interaction()
         self.scale(factor, factor)
 
         self.pan(self.mapFromScene(ref_point) - anchor)
         self.reset_previous_transform()
         self._position_draw_toolbar()
+
+    def _begin_zoom_interaction(self):
+        """Enter the lightweight rendering path for an active zoom gesture."""
+
+        if not self._zoom_interaction_active:
+            self._zoom_interaction_active = True
+            self.scene.suspend_shadow_rendering()
+        self._zoom_settle_timer.start()
+
+    def _finish_zoom_interaction(self):
+        """Restore decorative effects once the view has stopped zooming."""
+
+        if not self._zoom_interaction_active:
+            return
+        self._zoom_interaction_active = False
+        self.scene.resume_shadow_rendering()
 
     def wheelEvent(self, event):
         action, inverted\
@@ -1655,8 +1677,13 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self.zoom(float(event.value()) * 900, event.position())
             event.accept()
             return True
-        if gesture in (Qt.NativeGestureType.BeginNativeGesture,
-                       Qt.NativeGestureType.EndNativeGesture):
+        if gesture == Qt.NativeGestureType.BeginNativeGesture:
+            self._begin_zoom_interaction()
+            event.accept()
+            return True
+        if gesture == Qt.NativeGestureType.EndNativeGesture:
+            self._zoom_settle_timer.stop()
+            self._finish_zoom_interaction()
             event.accept()
             return True
         return False

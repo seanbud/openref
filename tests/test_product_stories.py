@@ -169,6 +169,23 @@ def test_drawing_popover_remains_anchored_through_zoom(view):
     assert popover.pos() == before
 
 
+def test_zoom_temporarily_hides_shadow_composites_and_restores_them(view):
+    note = BeeTextItem('Zoom me')
+    view.scene.addItem(note)
+    note.setSelected(True)
+    view.on_action_toggle_shadow()
+    composite = next(iter(view.scene._shadow_composites.values()))
+    assert composite.isVisible()
+
+    view.zoom(80, QtCore.QPointF(100, 100))
+    assert view._zoom_interaction_active is True
+    assert composite.isVisible() is False
+
+    view._finish_zoom_interaction()
+    assert view._zoom_interaction_active is False
+    assert composite.isVisible() is True
+
+
 def test_temporary_eraser_can_be_rebound(qtbot, view, kbsettings):
     kbsettings.set_temporary_eraser_modifier('alt')
     view.enter_draw_mode()

@@ -1,3 +1,13 @@
+0.6.0 beta 4
+============
+
+Performance
+-----------
+
+* Temporarily suspend decorative drop-shadow composites while zooming so
+  wheel and trackpad zoom remain responsive, then restore them after the
+  gesture settles.
+
 0.6.0 beta 3
 ============
 
