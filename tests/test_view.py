@@ -1675,6 +1675,32 @@ def test_native_pinch_zooms_at_gesture_position(zoom_mock, view):
     event.accept.assert_called_once_with()
 
 
+@patch('beeref.view.BeeGraphicsView.zoom')
+def test_native_pinch_reaches_viewport_event_filter(zoom_mock, view):
+    event = MagicMock()
+    event.type.return_value = QtCore.QEvent.Type.NativeGesture
+    event.gestureType.return_value = Qt.NativeGestureType.ZoomNativeGesture
+    event.value.return_value = -0.05
+    event.position.return_value = QtCore.QPointF(42, 24)
+
+    assert view.eventFilter(view.viewport(), event) is True
+    zoom_mock.assert_called_once_with(-45.0, QtCore.QPointF(42, 24))
+    event.accept.assert_called_once_with()
+
+
+@patch('beeref.view.BeeGraphicsView.zoom')
+def test_native_pinch_reaches_view_event(zoom_mock, view):
+    event = MagicMock()
+    event.type.return_value = QtCore.QEvent.Type.NativeGesture
+    event.gestureType.return_value = Qt.NativeGestureType.ZoomNativeGesture
+    event.value.return_value = 0.04
+    event.position.return_value = QtCore.QPointF(16, 32)
+
+    assert view.event(event) is True
+    zoom_mock.assert_called_once_with(36.0, QtCore.QPointF(16, 32))
+    event.accept.assert_called_once_with()
+
+
 @patch('PyQt6.QtWidgets.QGraphicsView.mouseMoveEvent')
 @patch('beeref.view.BeeGraphicsView.pan')
 def test_mouse_move_pan(pan_mock, mouse_event_mock, view):

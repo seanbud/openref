@@ -134,6 +134,10 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self.on_action_set_brush_color)
         self.draw_toolbar.close_requested.connect(
             lambda: self.exit_draw_mode(commit=True))
+        # On macOS, native trackpad gestures may be delivered to either the
+        # QGraphicsView or its viewport depending on the window style. Listen
+        # at the viewport boundary as well as in viewportEvent below.
+        self.viewport().installEventFilter(self)
         for control in (self.draw_toolbar,
                         *self.draw_toolbar.findChildren(QtWidgets.QWidget)):
             control.installEventFilter(self)
@@ -1634,23 +1638,34 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if (event.type() == QtCore.QEvent.Type.Resize
                 and hasattr(self, 'draw_toolbar')):
             QtCore.QTimer.singleShot(0, self._position_draw_toolbar)
-        if event.type() == QtCore.QEvent.Type.NativeGesture:
-            gesture = event.gestureType()
-            if gesture == Qt.NativeGestureType.ZoomNativeGesture:
-                # QNativeGestureEvent.value() is a small incremental scale
-                # delta. Reuse the same mouse-anchored zoom path as wheels.
-                self.zoom(float(event.value()) * 900, event.position())
-                event.accept()
-                return True
-            if gesture in (Qt.NativeGestureType.BeginNativeGesture,
-                           Qt.NativeGestureType.EndNativeGesture):
-                event.accept()
-                return True
+        if self._handle_native_gesture(event):
+            return True
         return super().viewportEvent(event)
+
+    def _handle_native_gesture(self, event):
+        """Translate a macOS pinch to the normal pointer-anchored zoom."""
+
+        if event.type() != QtCore.QEvent.Type.NativeGesture:
+            return False
+        gesture = event.gestureType()
+        if gesture == Qt.NativeGestureType.ZoomNativeGesture:
+            # QNativeGestureEvent.value() is a small incremental scale delta.
+            # Use the exact gesture position, not the current cursor, to keep
+            # the board point beneath the user's fingers stable.
+            self.zoom(float(event.value()) * 900, event.position())
+            event.accept()
+            return True
+        if gesture in (Qt.NativeGestureType.BeginNativeGesture,
+                       Qt.NativeGestureType.EndNativeGesture):
+            event.accept()
+            return True
+        return False
 
     def eventFilter(self, watched, event):
         """Track the configured eraser modifier across drawing controls."""
 
+        if watched is self.viewport() and self._handle_native_gesture(event):
+            return True
         if (event.type() in (QtCore.QEvent.Type.KeyPress,
                              QtCore.QEvent.Type.KeyRelease)
                 and event.key()
@@ -1679,6 +1694,10 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             super().tabletEvent(event)
 
     def event(self, event):
+        # Some macOS window configurations send trackpad gestures to the view
+        # rather than its viewport.
+        if self._handle_native_gesture(event):
+            return True
         if (event.type() == QtCore.QEvent.Type.ShortcutOverride
                 and hasattr(self, 'scene')
                 and self.note_key_action(event)):
