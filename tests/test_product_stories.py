@@ -303,8 +303,16 @@ def test_drop_shadow_toggles_for_text_and_drawing_with_undo(view):
     view.on_action_toggle_shadow()
     assert note.shadow['enabled'] is True
     assert stroke.shadow['enabled'] is True
-    assert note.graphicsEffect() is not None
-    assert stroke.graphicsEffect() is not None
+    assert note.shadow['group_id'] == stroke.shadow['group_id']
+    composites = view.scene._shadow_composites
+    assert len(composites) == 1
+    composite = next(iter(composites.values()))
+    assert set(composite.proxies) == {note, stroke}
+    assert composite.graphicsEffect() is not None
+    # The live items draw their selection affordances themselves; only the
+    # clean proxy layer receives an effect.
+    assert note.graphicsEffect() is None
+    assert stroke.graphicsEffect() is None
 
     view.undo_stack.undo()
     assert note.shadow['enabled'] is False
@@ -312,6 +320,27 @@ def test_drop_shadow_toggles_for_text_and_drawing_with_undo(view):
     view.undo_stack.redo()
     assert note.shadow['enabled'] is True
     assert stroke.shadow['enabled'] is True
+
+
+def test_multiple_drawings_share_a_single_shadow_composite(view):
+    drawings = []
+    for y in (0, 20):
+        item = BeePathItem([{
+            'tool': 'line', 'style': 'solid',
+            'color': [255, 255, 255, 255], 'base_size': 4,
+            'points': [{'x': 0, 'y': y}, {'x': 80, 'y': y}],
+        }])
+        item._update_bounding_rect()
+        view.scene.addItem(item)
+        item.setSelected(True)
+        drawings.append(item)
+
+    view.on_action_toggle_shadow()
+
+    assert len(view.scene._shadow_composites) == 1
+    composite = next(iter(view.scene._shadow_composites.values()))
+    assert set(composite.proxies) == set(drawings)
+    assert all(item.graphicsEffect() is None for item in drawings)
 
 
 @patch('beeref.main_controls.sys.platform', 'win32')

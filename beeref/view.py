@@ -101,6 +101,9 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self._temporary_eraser_tool = None
         self._eraser_candidates = {}
         self._eraser_active = False
+        self._eraser_last_preview_position = None
+        self._eraser_pending_position = None
+        self._eraser_preview_clock = QtCore.QElapsedTimer()
         self._right_canvas_panning = False
         self._right_canvas_pending = False
         self._fullscreen_anchor = None
@@ -880,16 +883,31 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
 
         self._clear_eraser_preview()
         self._eraser_active = True
+        self._eraser_last_preview_position = None
+        self._eraser_pending_position = None
+        self._eraser_preview_clock.start()
         view_pos = view_pos or self.mapFromScene(scene_pos)
         self.eraser_trail.begin(view_pos, self.draw_brush_size)
         self._preview_erase_at(scene_pos, view_pos)
 
-    def _preview_erase_at(self, scene_pos, view_pos=None):
+    def _preview_erase_at(self, scene_pos, view_pos=None, force=False):
         if not self._eraser_active:
             return
         view_pos = view_pos or self.mapFromScene(scene_pos)
         self.eraser_trail.add_point(view_pos)
+        self._eraser_pending_position = QtCore.QPointF(scene_pos)
         scene_radius = self.draw_brush_size / max(self.get_scale(), 0.0001)
+        last = self._eraser_last_preview_position
+        # Touch hardware can emit far more than the display can present. A
+        # 120 Hz cap plus a tiny spatial threshold keeps the preview smooth
+        # while avoiding duplicate geometric hit tests on giant drawings.
+        if (not force and last is not None
+                and self._eraser_preview_clock.elapsed() < 8
+                and QtCore.QLineF(last, scene_pos).length()
+                < max(0.5, scene_radius * 0.04)):
+            return
+        self._eraser_last_preview_position = QtCore.QPointF(scene_pos)
+        self._eraser_preview_clock.restart()
         area = QtCore.QRectF(
             scene_pos.x() - scene_radius,
             scene_pos.y() - scene_radius,
@@ -899,10 +917,11 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 continue
             local = item.mapFromScene(scene_pos)
             local_radius = scene_radius / max(abs(item.scale()), 0.0001)
-            indexes = item.stroke_indexes_at(local, local_radius)
+            candidates = self._eraser_candidates.setdefault(item, set())
+            indexes = item.stroke_indexes_at(
+                local, local_radius, skip_indexes=candidates)
             if not indexes:
                 continue
-            candidates = self._eraser_candidates.setdefault(item, set())
             candidates.update(indexes)
             item.set_erase_preview(candidates)
 
@@ -911,13 +930,20 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             item.set_erase_preview(())
         self._eraser_candidates = {}
         self._eraser_active = False
+        self._eraser_last_preview_position = None
+        self._eraser_pending_position = None
         if hasattr(self, 'eraser_trail'):
             self.eraser_trail.cancel()
 
     def _commit_eraser(self):
+        pending = self._eraser_pending_position
+        if (pending is not None and self._eraser_last_preview_position
+                != pending):
+            self._preview_erase_at(pending, force=True)
         candidates = self._eraser_candidates
         self._eraser_candidates = {}
         self._eraser_active = False
+        self._eraser_pending_position = None
         if not candidates:
             self.eraser_trail.finish()
             return

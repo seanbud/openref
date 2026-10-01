@@ -127,8 +127,19 @@ class ChangeShadows(QtGui.QUndoCommand):
 
     @staticmethod
     def _apply(states):
-        for item, shadow in states.items():
-            item.set_shadow(shadow)
+        # Updating a multi-selection one item at a time used to rebuild its
+        # shared shadow composite for every member.  Defer that visual sync
+        # until the complete undo state has been restored.
+        scenes = {item.scene() for item in states if item.scene() is not None}
+        for scene in scenes:
+            scene._suppress_shadow_sync = True
+        try:
+            for item, shadow in states.items():
+                item.set_shadow(shadow)
+        finally:
+            for scene in scenes:
+                scene._suppress_shadow_sync = False
+                scene.sync_shadow_composites()
 
     def redo(self):
         self._apply(self.after)

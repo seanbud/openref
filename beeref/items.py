@@ -814,6 +814,10 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         'blur': 12.0,
         'offset_x': 0.0,
         'offset_y': 5.0,
+        # Items that share this identifier are painted by one shadow
+        # composite. This prevents overlapping selected drawings from each
+        # casting their own seam-filled shadow.
+        'group_id': None,
     }
 
     def __init__(self, text=None, html=None, font_size=None,
@@ -906,22 +910,40 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         shadow['blur'] = max(0.0, float(shadow.get('blur', 12.0)))
         shadow['offset_x'] = float(shadow.get('offset_x', 0.0))
         shadow['offset_y'] = float(shadow.get('offset_y', 5.0))
+        group_id = shadow.get('group_id')
+        shadow['group_id'] = str(group_id) if group_id else None
         return shadow
 
     def _apply_shadow_effect(self):
-        if not self.shadow['enabled']:
-            self.setGraphicsEffect(None)
-            return
-        effect = QtWidgets.QGraphicsDropShadowEffect()
-        effect.setBlurRadius(self.shadow['blur'])
-        effect.setOffset(self.shadow['offset_x'], self.shadow['offset_y'])
-        effect.setColor(QtGui.QColor(self.shadow['color']))
-        self.setGraphicsEffect(effect)
+        # Effects attached to the live item also receive selection outlines
+        # and handles. BeeGraphicsScene instead renders a non-interactive
+        # proxy layer for shadows, either per item or as one shared composite.
+        self.setGraphicsEffect(None)
 
     def set_shadow(self, shadow):
         self.shadow = self._normalized_shadow(shadow)
         self._apply_shadow_effect()
         self.update()
+        if (self.scene() is not None
+                and not getattr(self.scene(), '_suppress_shadow_sync', False)):
+            self.scene().sync_shadow_composites()
+
+    def paint_shadow_subject(self, painter):
+        """Paint note content only; never caret or selection UI."""
+        rect = QtWidgets.QGraphicsTextItem.boundingRect(self)
+        painter.setBrush(QtGui.QColor(self.appearance['fill']))
+        border_width = self.appearance['border_width']
+        if border_width:
+            painter.setPen(QtGui.QPen(
+                QtGui.QColor(self.appearance['border_color']), border_width))
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
+        inset = border_width / 2
+        painter.drawRoundedRect(
+            rect.adjusted(inset, inset, -inset, -inset),
+            max(0, self.appearance['radius'] - inset),
+            max(0, self.appearance['radius'] - inset))
+        self.document().drawContents(painter, rect)
 
     def _set_default_font_size(self, size):
         font = self.document().defaultFont()
@@ -1291,6 +1313,9 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         self.temp_stroke = None
         self.erase_preview_indexes = set()
         self._cached_rect = QtCore.QRectF(0, 0, 1, 1)
+        self._stroke_path_cache = []
+        self._stroke_bounds_cache = []
+        self._eraser_hit_cache = {}
         self.init_selectable()
         self.shadow = BeeTextItem._normalized_shadow(shadow)
         self._apply_shadow_effect()
@@ -1328,19 +1353,21 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
     _normalized_shadow = BeeTextItem._normalized_shadow
 
     def _apply_shadow_effect(self):
-        if not self.shadow['enabled']:
-            self.setGraphicsEffect(None)
-            return
-        effect = QtWidgets.QGraphicsDropShadowEffect()
-        effect.setBlurRadius(self.shadow['blur'])
-        effect.setOffset(self.shadow['offset_x'], self.shadow['offset_y'])
-        effect.setColor(QtGui.QColor(self.shadow['color']))
-        self.setGraphicsEffect(effect)
+        self.setGraphicsEffect(None)
 
     def set_shadow(self, shadow):
         self.shadow = self._normalized_shadow(shadow)
         self._apply_shadow_effect()
         self.update()
+        if (self.scene() is not None
+                and not getattr(self.scene(), '_suppress_shadow_sync', False)):
+            self.scene().sync_shadow_composites()
+
+    def paint_shadow_subject(self, painter):
+        """Paint drawing content only; selection handles stay on the item."""
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        for stroke in self.strokes:
+            self._paint_stroke(painter, stroke)
 
     def bounding_rect_unselected(self):
         rect = QtCore.QRectF(self._cached_rect)
@@ -1361,6 +1388,25 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         self.strokes = copy.deepcopy(strokes)
         self._update_bounding_rect()
         self.update()
+
+    def _rebuild_stroke_cache(self):
+        """Cache smoothed paths and broad-phase bounds for hit testing."""
+        self._stroke_path_cache = []
+        self._stroke_bounds_cache = []
+        self._eraser_hit_cache = {}
+        for stroke in self.strokes:
+            path = self._stroke_path(stroke)
+            path.addPath(self._arrow_path(stroke))
+            width = self._effective_width(stroke)
+            margin = width / 2 + 3
+            bounds = path.boundingRect().marginsAdded(
+                QtCore.QMarginsF(margin, margin, margin, margin))
+            self._stroke_path_cache.append(path)
+            self._stroke_bounds_cache.append(bounds)
+
+    def _ensure_stroke_cache(self):
+        if len(self._stroke_path_cache) != len(self.strokes):
+            self._rebuild_stroke_cache()
 
     @staticmethod
     def _point(data):
@@ -1451,10 +1497,13 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
     def _update_bounding_rect(self):
         if not self.strokes:
             self._cached_rect = QtCore.QRectF(0, 0, 1, 1)
+            self._stroke_path_cache = []
+            self._stroke_bounds_cache = []
+            self._eraser_hit_cache = {}
             return
+        self._rebuild_stroke_cache()
         rect = QtCore.QRectF()
-        for stroke in self.strokes:
-            bounds = self._stroke_bounds(stroke)
+        for bounds in self._stroke_bounds_cache:
             rect = bounds if rect.isNull() else rect.united(bounds)
         self._cached_rect = (
             rect if not rect.isNull() else QtCore.QRectF(0, 0, 1, 1))
@@ -1489,18 +1538,34 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
             painter.setPen(pen)
             painter.drawPath(arrow)
 
-    def stroke_indexes_at(self, point, radius):
+    def stroke_indexes_at(self, point, radius, skip_indexes=()):
         """Return marks intersecting an eraser centered on ``point``."""
 
+        self._ensure_stroke_cache()
         eraser = QtGui.QPainterPath()
         eraser.addEllipse(point, radius, radius)
+        eraser_bounds = eraser.boundingRect()
+        skipped = set(skip_indexes)
         matches = []
-        for index, stroke in enumerate(self.strokes):
-            path = self._stroke_path(stroke)
-            path.addPath(self._arrow_path(stroke))
-            stroker = QtGui.QPainterPathStroker()
-            stroker.setWidth(self._effective_width(stroke) + radius * 2)
-            if stroker.createStroke(path).intersects(eraser):
+        # The radius remains stable for a drawing during an erase gesture.
+        # Reuse the costly stroked outline at the same effective width.
+        radius_key = round(float(radius), 3)
+        for index, path in enumerate(self._stroke_path_cache):
+            if index in skipped:
+                continue
+            if not self._stroke_bounds_cache[index].adjusted(
+                    -radius, -radius, radius, radius).intersects(
+                        eraser_bounds):
+                continue
+            cache_key = (index, radius_key)
+            hit_path = self._eraser_hit_cache.get(cache_key)
+            if hit_path is None:
+                stroker = QtGui.QPainterPathStroker()
+                stroker.setWidth(
+                    self._effective_width(self.strokes[index]) + radius * 2)
+                hit_path = stroker.createStroke(path)
+                self._eraser_hit_cache[cache_key] = hit_path
+            if hit_path.intersects(eraser):
                 matches.append(index)
         return matches
 
@@ -1511,7 +1576,10 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
     def set_erase_preview(self, indexes):
         """Fade marks that will be removed when the erase drag ends."""
 
-        self.erase_preview_indexes = set(indexes)
+        indexes = set(indexes)
+        if indexes == self.erase_preview_indexes:
+            return
+        self.erase_preview_indexes = indexes
         self.update()
 
     def erase_indexes(self, indexes):
@@ -1530,12 +1598,12 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
     def shape(self):
         if self.has_selection_handles():
             return super().shape()
+        self._ensure_stroke_cache()
         result = QtGui.QPainterPath()
-        for stroke in self.strokes:
+        for index, stroke in enumerate(self.strokes):
             stroker = QtGui.QPainterPathStroker()
             stroker.setWidth(max(8, self._effective_width(stroke) + 4))
-            result.addPath(stroker.createStroke(self._stroke_path(stroke)))
-            result.addPath(stroker.createStroke(self._arrow_path(stroke)))
+            result.addPath(stroker.createStroke(self._stroke_path_cache[index]))
         return result
 
     def paint(self, painter, option, widget):

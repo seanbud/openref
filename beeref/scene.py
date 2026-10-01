@@ -17,6 +17,7 @@ from functools import partial
 import logging
 import math
 from queue import Queue
+import uuid
 
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtCore import Qt
@@ -30,6 +31,69 @@ from beeref.selection import MultiSelectItem, RubberbandItem
 
 
 logger = logging.getLogger(__name__)
+
+
+class _ShadowSubjectItem(QtWidgets.QGraphicsItem):
+    """A non-interactive visual clone used only by a shadow composite."""
+
+    def __init__(self, target, parent=None):
+        super().__init__(parent)
+        self.target = target
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.sync()
+
+    def sync(self):
+        target = self.target
+        self.prepareGeometryChange()
+        self.setPos(target.pos())
+        self.setScale(target.scale())
+        self.setRotation(target.rotation())
+        self.setTransform(target.transform())
+        self.setZValue(target.zValue())
+        self.update()
+
+    def boundingRect(self):
+        return self.target.bounding_rect_unselected()
+
+    def paint(self, painter, option, widget):
+        self.target.paint_shadow_subject(painter)
+
+
+class _ShadowCompositeItem(QtWidgets.QGraphicsItemGroup):
+    """One clean shadow source for one or more styled board items."""
+
+    def __init__(self, shadow_id, parent=None):
+        super().__init__(parent)
+        self.shadow_id = shadow_id
+        self.proxies = {}
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+
+    def sync(self, members, z_step):
+        members = list(members)
+        wanted = set(members)
+        for target, proxy in list(self.proxies.items()):
+            if target not in wanted:
+                self.removeFromGroup(proxy)
+                proxy.setParentItem(None)
+                del self.proxies[target]
+        for target in members:
+            proxy = self.proxies.get(target)
+            if proxy is None:
+                proxy = _ShadowSubjectItem(target)
+                self.addToGroup(proxy)
+                self.proxies[target] = proxy
+            proxy.sync()
+        if not members:
+            return
+        shadow = members[0].shadow
+        effect = self.graphicsEffect()
+        if effect is None:
+            effect = QtWidgets.QGraphicsDropShadowEffect()
+            self.setGraphicsEffect(effect)
+        effect.setBlurRadius(shadow['blur'])
+        effect.setOffset(shadow['offset_x'], shadow['offset_y'])
+        effect.setColor(QtGui.QColor(shadow['color']))
+        self.setZValue(min(item.zValue() for item in members) - z_step / 2)
 
 
 class BeeGraphicsScene(QtWidgets.QGraphicsScene):
@@ -53,12 +117,16 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self.crop_item = None
         self.settings = BeeSettings()
         self._syncing_groups = False
+        self._syncing_shadows = False
+        self._suppress_shadow_sync = False
+        self._shadow_composites = {}
         self.clear()
         self._clear_ongoing = False
 
     def clear(self):
         self._clear_ongoing = True
         super().clear()
+        self._shadow_composites = {}
         self.used_space_rect = QtCore.QRectF()
         self.internal_clipboard = []
         self.rubberband_item = RubberbandItem()
@@ -156,12 +224,18 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         if not items:
             return None
         enabled = not all(item.shadow.get('enabled', False) for item in items)
+        # One shared id turns a multiselection into a single alpha mask for
+        # its shadow. Single items still use a composite, simply with one
+        # member, so handles are never included in the effect.
+        shadow_id = uuid.uuid4().hex
         before = {item: dict(item.shadow) for item in items}
         after = {
-            item: dict(item.shadow, enabled=enabled)
+            item: dict(item.shadow, enabled=enabled,
+                       group_id=shadow_id if enabled else None)
             for item in items
         }
         self.undo_stack.push(commands.ChangeShadows(before, after))
+        self.sync_shadow_composites()
         return enabled
 
     def paste_from_internal_clipboard(self, position):
@@ -679,6 +753,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             self.multi_select_item.fit_selection_area(
                 self.itemsBoundingRect(selection_only=True))
         self.sync_groups()
+        self.sync_shadow_composites()
         self.expand_used_space()
 
     def sync_groups(self):
@@ -691,6 +766,42 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 group.refresh_bounds()
         finally:
             self._syncing_groups = False
+
+    def sync_shadow_composites(self):
+        """Mirror saved shadow states into clean, shared visual layers."""
+        if self._syncing_shadows:
+            return
+        self._syncing_shadows = True
+        try:
+            members_by_id = {}
+            for item in self.items_for_save():
+                if getattr(item, 'TYPE', None) not in ('text', 'path'):
+                    continue
+                shadow = getattr(item, 'shadow', {})
+                if not shadow.get('enabled'):
+                    continue
+                shadow_id = shadow.get('group_id')
+                if not shadow_id:
+                    shadow_id = uuid.uuid4().hex
+                    item.shadow['group_id'] = shadow_id
+                members_by_id.setdefault(shadow_id, []).append(item)
+
+            for shadow_id, composite in list(
+                    self._shadow_composites.items()):
+                if shadow_id not in members_by_id:
+                    if composite.scene() is self:
+                        self.removeItem(composite)
+                    del self._shadow_composites[shadow_id]
+
+            for shadow_id, members in members_by_id.items():
+                composite = self._shadow_composites.get(shadow_id)
+                if composite is None:
+                    composite = _ShadowCompositeItem(shadow_id)
+                    self.addItem(composite)
+                    self._shadow_composites[shadow_id] = composite
+                composite.sync(members, self.Z_STEP)
+        finally:
+            self._syncing_shadows = False
 
     def add_item_later(self, itemdata, selected=False):
         """Keep an item for adding later via ``add_queued_items``

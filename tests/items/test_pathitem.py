@@ -80,6 +80,21 @@ def test_eraser_preview_fades_without_mutating_until_commit(qapp):
     assert item.erase_preview_indexes == set()
 
 
+def test_eraser_reuses_cached_hit_geometry(qapp):
+    strokes = [mark(start=(index * 50, 0), end=(index * 50 + 40, 0))
+               for index in range(12)]
+    item = BeePathItem(strokes)
+    item._update_bounding_rect()
+
+    first = item.stroke_indexes_at(QtCore.QPointF(20, 0), 8)
+    cached = dict(item._eraser_hit_cache)
+    second = item.stroke_indexes_at(QtCore.QPointF(22, 0), 8)
+
+    assert first == second == [0]
+    assert cached
+    assert item._eraser_hit_cache == cached
+
+
 def test_freehand_path_uses_cubic_smoothing(qapp):
     stroke = mark('pen')
     stroke['points'].insert(1, {'x': 12, 'y': 18, 'pressure': 1.0})
