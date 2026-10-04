@@ -1,4 +1,5 @@
 from PyQt6 import QtCore, QtGui
+from unittest.mock import patch
 
 from beeref.fileio.export import SceneToSVGExporter
 from beeref.items import BeePathItem, item_registry
@@ -93,6 +94,38 @@ def test_eraser_reuses_cached_hit_geometry(qapp):
     assert first == second == [0]
     assert cached
     assert item._eraser_hit_cache == cached
+
+
+def test_repaints_reuse_cached_smoothed_paths(qapp):
+    item = BeePathItem([mark(), mark('line', 'arrow')])
+    item._update_bounding_rect()
+    image = QtGui.QImage(100, 100, QtGui.QImage.Format.Format_ARGB32)
+    painter = QtGui.QPainter(image)
+
+    with patch.object(
+            item, '_stroke_path', wraps=item._stroke_path) as path_spy:
+        item.paint_shadow_subject(painter)
+        item.paint_shadow_subject(painter)
+
+    painter.end()
+    path_spy.assert_not_called()
+
+
+def test_selection_shape_is_cached_until_strokes_change(qapp):
+    item = BeePathItem([mark(), mark(start=(0, 40), end=(40, 40))])
+    item._update_bounding_rect()
+
+    with patch.object(
+            item, '_build_selection_shape',
+            wraps=item._build_selection_shape) as shape_spy:
+        first = item.shape()
+        second = item.shape()
+        assert shape_spy.call_count == 1
+        assert first == second
+
+        item.replace_strokes([mark('ellipse')])
+        item.shape()
+        assert shape_spy.call_count == 2
 
 
 def test_freehand_path_uses_cubic_smoothing(qapp):

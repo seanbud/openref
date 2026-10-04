@@ -1049,7 +1049,23 @@ def test_mouse_release_event_when_rubberband_active(mouse_mock, view):
 
     view.scene.mouseReleaseEvent(event)
     view.scene.removeItem.assert_called_once_with(view.scene.rubberband_item)
-    view.scene.active_mode is None
+    assert view.scene.active_mode is None
+
+
+def test_shadow_rendering_waits_for_all_interactions(view):
+    scene = view.scene
+
+    scene.suspend_shadow_rendering('zoom')
+    scene.suspend_shadow_rendering('pan')
+    scene.resume_shadow_rendering('zoom')
+
+    assert scene._shadow_rendering_suspended is True
+    assert scene._shadow_suspension_reasons == {'pan'}
+
+    scene.resume_shadow_rendering('pan')
+
+    assert scene._shadow_rendering_suspended is False
+    assert scene._shadow_suspension_reasons == set()
 
 
 @patch('PyQt6.QtWidgets.QGraphicsScene.mouseReleaseEvent')

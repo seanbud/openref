@@ -1,3 +1,26 @@
+0.7.0 beta 1
+============
+
+Changed
+-------
+
+* Dense drawing boards reuse their smoothed paint paths and selection hit-test
+  outlines instead of reconstructing them for every repaint or box-selection
+  update.
+* Drop-shadow composites pause during active zoom, pan, item-drag, and
+  rubber-band selection gestures, then return with their saved appearance when
+  the interaction settles.
+* Canvas navigation grows its available scene area only near an edge, and
+  transient selection geometry no longer triggers unrelated whole-scene
+  bounds, group, or note-toolbar work at pointer frequency.
+
+Product direction
+-----------------
+
+* Retired the speculative appearance-container and automatic symbol-recognition
+  roadmap. The current board experience is now the baseline, with performance,
+  reliability, and workflow polish taking priority.
+
 0.6.0 beta 5
 ============
 

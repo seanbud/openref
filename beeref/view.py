@@ -118,6 +118,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self._zoom_interaction_active = False
         self.window_position_locked = False
         self._recalculating_scene_rect = False
+        self._managed_scene_rect_initialized = False
 
         self.scene = BeeGraphicsScene(self.undo_stack)
         self.scene.changed.connect(self.on_scene_changed)
@@ -227,6 +228,13 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
 
     def cancel_active_modes(self):
         self.scene.cancel_active_modes()
+        self.scene.resume_shadow_rendering('pan')
+        if self._zoom_interaction_active:
+            self._zoom_settle_timer.stop()
+            self._finish_zoom_interaction()
+        self._draw_panning = False
+        self._right_canvas_pending = False
+        self._right_canvas_panning = False
         if self.active_mode == self.DRAW_MODE:
             self.exit_draw_mode(commit=True)
         elif self.active_mode == self.SAMPLE_COLOR_MODE:
@@ -255,6 +263,12 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self.parent.setWindowTitle(title)
 
     def on_scene_changed(self, region):
+        if self.scene.active_mode in (
+                self.scene.RUBBERBAND_MODE, self.scene.MOVE_MODE):
+            # Transient selection geometry and item movement generate scene
+            # changes at pointer frequency. Welcome state, actions, persistent
+            # bounds, and note controls do not need recomputing per frame.
+            return
         canvas_exists = not self.scene.used_space_rect.isEmpty()
         if not self.scene.items() and not canvas_exists:
             logger.debug('No items in scene')
@@ -271,8 +285,6 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             has_items = bool(self.scene.items())
             self.actiongroup_set_enabled(
                 'active_when_items_in_scene', has_items)
-            if has_items:
-                self.scene.expand_used_space()
         self.recalc_scene_rect()
         self.refresh_note_tools()
 
@@ -307,6 +319,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self.undo_stack.clear()
         self.filename = None
         self.setTransform(QtGui.QTransform())
+        self._managed_scene_rect_initialized = False
         self.on_scene_changed(None)
 
     def reset_previous_transform(self, toggle_item=None):
@@ -1440,7 +1453,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self.viewport().unsetCursor()
 
     def recalc_scene_rect(self):
-        """Keep several screens of navigable space around the viewport."""
+        """Grow navigable space only when the viewport nears its boundary."""
 
         if self.previous_transform or self._recalculating_scene_rect:
             return
@@ -1450,10 +1463,21 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             visible = self.mapToScene(self.viewport().rect()).boundingRect()
             canvas = QtCore.QRectF(self.scene.used_space_rect)
             combined = visible if canvas.isEmpty() else visible.united(canvas)
+            current = QtCore.QRectF(self.sceneRect())
+            if self._managed_scene_rect_initialized and not current.isEmpty():
+                safe = current.adjusted(
+                    visible.width(), visible.height(),
+                    -visible.width(), -visible.height())
+                if not safe.isEmpty() and safe.contains(combined):
+                    return
             margin_x = max(visible.width() * 4, 1000)
             margin_y = max(visible.height() * 4, 1000)
-            self.setSceneRect(combined.marginsAdded(
-                QtCore.QMarginsF(margin_x, margin_y, margin_x, margin_y)))
+            target = combined.marginsAdded(
+                QtCore.QMarginsF(margin_x, margin_y, margin_x, margin_y))
+            if self._managed_scene_rect_initialized:
+                target = current.united(target)
+            self.setSceneRect(target)
+            self._managed_scene_rect_initialized = True
         except OverflowError:
             logger.info('Maximum scene size reached')
         finally:
@@ -1595,7 +1619,10 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         super().scrollContentsBy(dx, dy)
         if hasattr(self, 'draw_toolbar'):
             self._position_draw_toolbar()
-        self.refresh_note_tools()
+        if (getattr(self.scene, 'edit_item', None) is not None
+                or (hasattr(self, 'note_toolbar')
+                    and self.note_toolbar.isVisible())):
+            self.refresh_note_tools()
 
     def pan(self, delta):
         hscroll = self.horizontalScrollBar()
@@ -1637,7 +1664,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
 
         if not self._zoom_interaction_active:
             self._zoom_interaction_active = True
-            self.scene.suspend_shadow_rendering()
+            self.scene.suspend_shadow_rendering('zoom')
         self._zoom_settle_timer.start()
 
     def _finish_zoom_interaction(self):
@@ -1646,7 +1673,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if not self._zoom_interaction_active:
             return
         self._zoom_interaction_active = False
-        self.scene.resume_shadow_rendering()
+        self.scene.resume_shadow_rendering('zoom')
 
     def wheelEvent(self, event):
         action, inverted\
@@ -1786,6 +1813,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                         and modifiers
                         & Qt.KeyboardModifier.AltModifier)):
                 self._draw_panning = True
+                self.scene.suspend_shadow_rendering('pan')
                 self.event_start = event.position()
                 self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
                 event.accept()
@@ -1839,6 +1867,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if action == 'pan':
             logger.trace('Begin pan')
             self.active_mode = self.PAN_MODE
+            self.scene.suspend_shadow_rendering('pan')
             self.event_start = event.position()
             self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
             # ClosedHandCursor and OpenHandCursor don't work, but I
@@ -1856,6 +1885,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                     or self._right_canvas_panning):
                 if not self._right_canvas_panning:
                     self._right_canvas_panning = True
+                    self.scene.suspend_shadow_rendering('pan')
                     self.viewport().setCursor(
                         Qt.CursorShape.ClosedHandCursor)
                 self.reset_previous_transform()
@@ -1960,6 +1990,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             was_panning = self._right_canvas_panning
             self._right_canvas_pending = False
             self._right_canvas_panning = False
+            self.scene.resume_shadow_rendering('pan')
             self.viewport().unsetCursor()
             if self.active_mode == self.DRAW_MODE:
                 self.set_draw_tool(self.draw_tool, announce=False)
@@ -1969,6 +2000,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             return
         if self.active_mode == self.DRAW_MODE and self._draw_panning:
             self._draw_panning = False
+            self.scene.resume_shadow_rendering('pan')
             self.set_draw_tool(self.draw_tool)
             event.accept()
             return
@@ -1995,6 +2027,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
 
         if self.active_mode == self.PAN_MODE:
             logger.trace('End pan')
+            self.scene.resume_shadow_rendering('pan')
             self.viewport().unsetCursor()
             self.active_mode = None
             event.accept()
