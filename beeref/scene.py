@@ -153,7 +153,12 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._suppress_shadow_sync = False
         self._shadow_rendering_suspended = False
         self._shadow_suspension_reasons = set()
+        self._shadow_geometry_dirty = False
         self._shadow_composites = {}
+        self._shadow_resume_timer = QtCore.QTimer(self)
+        self._shadow_resume_timer.setSingleShot(True)
+        self._shadow_resume_timer.timeout.connect(
+            self._restore_shadow_rendering)
         self._used_space_refresh_timer = QtCore.QTimer(self)
         self._used_space_refresh_timer.setSingleShot(True)
         self._used_space_refresh_timer.timeout.connect(self.expand_used_space)
@@ -163,9 +168,11 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
     def clear(self):
         self._clear_ongoing = True
         self._used_space_refresh_timer.stop()
+        self._shadow_resume_timer.stop()
         super().clear()
         self._shadow_suspension_reasons = set()
         self._shadow_rendering_suspended = False
+        self._shadow_geometry_dirty = False
         self._shadow_composites = {}
         self.used_space_rect = QtCore.QRectF()
         self.internal_clipboard = []
@@ -734,7 +741,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                     commands.MoveItemsBy(self.selectedItems(),
                                          delta,
                                          ignore_first_redo=True))
-        self.resume_shadow_rendering('scene-move')
+        self.resume_shadow_rendering('scene-move', deferred=True)
         self.active_mode = None
         super().mouseReleaseEvent(event)
 
@@ -909,6 +916,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         suspended until the gesture settles.
         """
 
+        self._shadow_resume_timer.stop()
         self._shadow_suspension_reasons.add(reason)
         if self._shadow_rendering_suspended:
             return
@@ -916,7 +924,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         for composite in self._shadow_composites.values():
             composite.setVisible(False)
 
-    def resume_shadow_rendering(self, reason='interaction'):
+    def resume_shadow_rendering(self, reason='interaction', deferred=False):
         """Restore shadows after all overlapping interactions have settled."""
 
         self._shadow_suspension_reasons.discard(reason)
@@ -924,6 +932,28 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             return
         if not self._shadow_rendering_suspended:
             return
+        if deferred:
+            # QGraphicsItem movement is still unwinding from Qt's native
+            # mouse dispatch here. Reattaching a live blur effect in that
+            # stack can race its hidden proxy geometry and crash in Qt.
+            self._shadow_resume_timer.start(0)
+            return
+        self._restore_shadow_rendering()
+
+    def _restore_shadow_rendering(self):
+        """Synchronize hidden proxies once, then restore their effects."""
+
+        if self._shadow_suspension_reasons:
+            return
+        if not self._shadow_rendering_suspended:
+            return
+        if self._shadow_geometry_dirty:
+            # Keep the composite hidden while rebuilding every moved proxy.
+            # This runs outside the originating pointer event when requested
+            # by item dragging and replaces per-sample effect mutations with
+            # one final synchronization.
+            self.sync_shadow_composites()
+            self._shadow_geometry_dirty = False
         self._shadow_rendering_suspended = False
         for composite in self._shadow_composites.values():
             composite.setVisible(True)
@@ -934,6 +964,9 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
 
         if self._syncing_shadows or not getattr(item, 'shadow', {}).get(
                 'enabled'):
+            return
+        if self._shadow_rendering_suspended:
+            self._shadow_geometry_dirty = True
             return
         shadow_id = item.shadow.get('group_id')
         composite = self._shadow_composites.get(shadow_id)
