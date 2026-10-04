@@ -1,6 +1,29 @@
 0.6.0 beta 4
 ============
 
+Changed
+-------
+
+* Large pasted or dropped images keep their full source resolution but open at
+  a manageable initial display scale without moving the canvas camera.
+* Shift-click now works alongside Control-click for additive board selection.
+* Freehand smoothing is causal, so new pointer samples no longer pull already
+  drawn segments toward the cursor.
+
+Fixed
+-----
+
+* Preserved intentional leading spaces and tabs when rich notes are saved,
+  reopened, edited, or restored through Undo.
+* Fixed rapid drop-shadow toggling crashes and stale shadow previews while
+  editing note text.
+* Restored canvas-relative pen widths at extreme zoom levels.
+* Pasting now exits drawing mode and selects the newly inserted item.
+* Frameless Windows windows can start an edge resize through the contextual top
+  chrome as well as through the canvas viewport.
+* Avoided reinstalling Qt's native widget style on the offscreen test platform,
+  preventing a Qt 6.7 crash in the Python 3.11 CI job.
+
 Performance
 -----------
 

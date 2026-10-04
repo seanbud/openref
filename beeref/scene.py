@@ -111,6 +111,22 @@ class _ShadowCompositeItem(QtWidgets.QGraphicsItemGroup):
         if self.zValue() != z_value:
             self.setZValue(z_value)
 
+    def dispose(self, scene):
+        """Detach native effect and proxy ownership before removing a layer."""
+
+        # Qt owns graphics effects and item-group children.  Removing a group
+        # with both still attached can make the native wrappers race during a
+        # rapid shadow on/off toggle.  Tear the ownership graph down in a
+        # deterministic order first.
+        self.setGraphicsEffect(None)
+        for proxy in list(self.proxies.values()):
+            self.removeFromGroup(proxy)
+            if proxy.scene() is scene:
+                scene.removeItem(proxy)
+        self.proxies.clear()
+        if self.scene() is scene:
+            scene.removeItem(self)
+
 
 class BeeGraphicsScene(QtWidgets.QGraphicsScene):
     cursor_changed = QtCore.pyqtSignal(QtGui.QCursor)
@@ -625,6 +641,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 and item_at_pos is not None
                 and item_at_pos is not self.multi_select_item
                 and hasattr(item_at_pos, 'bring_to_front')
+                and item_at_pos.isSelected()
                 and item_at_pos.scene() is self):
             # Clicking a covered object is an intentional layer decision,
             # not merely a transient selection detail. Record it so a board
@@ -820,8 +837,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             for shadow_id, composite in list(
                     self._shadow_composites.items()):
                 if shadow_id not in members_by_id:
-                    if composite.scene() is self:
-                        self.removeItem(composite)
+                    composite.dispose(self)
                     del self._shadow_composites[shadow_id]
 
             for shadow_id, members in members_by_id.items():
@@ -831,6 +847,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                     self.addItem(composite)
                     self._shadow_composites[shadow_id] = composite
                 composite.sync(members, self.Z_STEP)
+                composite.setVisible(not self._shadow_rendering_suspended)
         finally:
             self._syncing_shadows = False
 

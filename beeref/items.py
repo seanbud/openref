@@ -783,6 +783,15 @@ def _sanitize_note_html(html):
     return parser.result()
 
 
+NOTE_WHITESPACE_STYLE = '<style>p,li { white-space: pre-wrap; }</style>'
+
+
+def _set_note_html(document, html):
+    """Load sanitized rich text while preserving user indentation."""
+
+    document.setHtml(NOTE_WHITESPACE_STYLE + _sanitize_note_html(html))
+
+
 def _looks_like_markdown(text):
     return bool(re.search(r'(^|\n)(#{1,6}\s|[-*+]\s|\d+[.)]\s)|'
                           r'\*\*.+?\*\*|__.+?__|`[^`]+`', text or ''))
@@ -852,7 +861,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             self._set_default_font_size(self._font_size)
         self.setTextWidth(self._text_width)
         if html is not None:
-            self.document().setHtml(_sanitize_note_html(html))
+            _set_note_html(self.document(), html)
         else:
             initial_text = 'Text' if text is None and legacy else text
             self.setPlainText(initial_text or '')
@@ -985,7 +994,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
                 # empty so placeholder/removal semantics remain stable.
                 self.setPlainText('')
             elif state.get('html') is not None:
-                self.document().setHtml(_sanitize_note_html(state['html']))
+                _set_note_html(self.document(), state['html'])
             else:
                 self.setPlainText(state.get('text', ''))
         finally:
@@ -1040,6 +1049,9 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
     def _document_changed(self):
         self.prepareGeometryChange()
         self.update()
+        scene = self.scene()
+        if scene is not None and self.shadow.get('enabled'):
+            scene.sync_shadow_for(self, force=True)
         if self.edit_mode and not self._applying_state:
             self._editing_changed(True)
 
@@ -1444,24 +1456,19 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
             elif len(points) == 2:
                 path.lineTo(end)
             else:
-                # Suppress high-frequency pointer jitter before interpolating.
-                # Endpoints remain exact while the weighted interior samples
-                # produce a calmer, ink-like curve at every zoom level.
+                # Use a causal curve: each completed segment depends only on
+                # points already received.  The previous implementation used
+                # a future neighbour to smooth each point, so adding a fast,
+                # distant sample visibly pulled the line already on screen
+                # toward the pointer (especially when zoomed in).
                 raw = [self._point(point) for point in points]
-                vectors = [raw[0]]
-                for index in range(1, len(raw) - 1):
-                    vectors.append(
-                        (raw[index - 1] + raw[index] * 2
-                         + raw[index + 1]) / 4)
-                vectors.append(raw[-1])
-                for index in range(len(vectors) - 1):
-                    before = vectors[max(0, index - 1)]
-                    current = vectors[index]
-                    following = vectors[index + 1]
-                    after = vectors[min(len(vectors) - 1, index + 2)]
-                    control_1 = current + (following - before) / 6
-                    control_2 = following - (after - current) / 6
-                    path.cubicTo(control_1, control_2, following)
+                previous_direction = raw[1] - raw[0]
+                for index in range(1, len(raw)):
+                    segment = raw[index] - raw[index - 1]
+                    control_1 = raw[index - 1] + previous_direction / 3
+                    control_2 = raw[index] - segment / 3
+                    path.cubicTo(control_1, control_2, raw[index])
+                    previous_direction = segment
         return path
 
     def _arrow_path(self, stroke):
@@ -1532,7 +1539,11 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         if tool == 'pen' and any('pressure' in point for point in points):
             pressure = sum(
                 point.get('pressure', 1.0) for point in points) / len(points)
-            pen.setWidthF(max(0.5, base_size * pressure))
+            # ``base_size`` is expressed in canvas coordinates so the chosen
+            # brush width stays visually constant at the zoom level where it
+            # was drawn.  An absolute 0.5-scene-unit floor turns into a giant
+            # stroke at deep zoom; clamp pressure, not canvas width.
+            pen.setWidthF(max(0.0001, base_size * max(0.05, pressure)))
             painter.setPen(pen)
         painter.drawPath(self._stroke_path(stroke))
 

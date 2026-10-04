@@ -780,6 +780,24 @@ def test_frameless_window_has_edge_resize_fallback(main_window):
     assert edges & Qt.Edge.TopEdge
 
 
+def test_frameless_top_chrome_starts_edge_resize(main_window):
+    main_window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+    event = MagicMock()
+    event.type.return_value = QtCore.QEvent.Type.MouseButtonPress
+    event.position.return_value = QtCore.QPointF(20, 0)
+    event.button.return_value = Qt.MouseButton.LeftButton
+    chrome = main_window.view.window_chrome
+
+    with patch.object(main_window, '_resize_edges_at',
+                      return_value=Qt.Edge.TopEdge):
+        handled = main_window.eventFilter(chrome, event)
+
+    assert handled is True
+    assert main_window._resize_drag[2] == Qt.Edge.TopEdge
+    assert main_window._resize_surface is chrome
+    event.accept.assert_called_once()
+
+
 @patch('beeref.scene.BeeGraphicsScene.clearSelection')
 @patch('PyQt6.QtGui.QClipboard.image')
 def test_on_action_paste_external_new_scene(
@@ -790,6 +808,21 @@ def test_on_action_paste_external_new_scene(
     assert len(view.scene.items()) == 1
     assert view.scene.items()[0].isSelected() is True
     view.cancel_active_modes.assert_called_once_with()
+
+
+@patch('PyQt6.QtWidgets.QApplication.clipboard')
+def test_paste_exits_draw_mode_and_selects_image(clipboard_mock, view):
+    image = QtGui.QImage(12, 8, QtGui.QImage.Format.Format_ARGB32)
+    clipboard_mock.return_value.image.return_value = image
+    clipboard_mock.return_value.mimeData.return_value = QtCore.QMimeData()
+    view.enter_draw_mode()
+
+    view.on_action_paste()
+
+    selected = view.scene.selectedItems(user_only=True)
+    assert view.active_mode != view.DRAW_MODE
+    assert len(selected) == 1
+    assert isinstance(selected[0], BeePixmapItem)
 
 
 @patch('beeref.view.BeeGraphicsView.on_action_fit_scene')

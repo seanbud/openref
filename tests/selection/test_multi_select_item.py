@@ -116,6 +116,19 @@ def test_mouse_press_event_when_ctrl_leftclick(mouse_mock):
     mouse_mock.assert_not_called()
 
 
+@patch('PyQt6.QtWidgets.QGraphicsRectItem.mousePressEvent')
+def test_mouse_press_event_when_shift_leftclick(mouse_mock):
+    item = MultiSelectItem()
+    item.fit_selection_area(QtCore.QRectF(0, 0, 100, 80))
+    event = MagicMock(
+        button=MagicMock(return_value=Qt.MouseButton.LeftButton),
+        modifiers=MagicMock(
+            return_value=Qt.KeyboardModifier.ShiftModifier))
+    item.mousePressEvent(event)
+    event.ignore.assert_called_once()
+    mouse_mock.assert_not_called()
+
+
 @patch('beeref.selection.SelectableMixin.mousePressEvent')
 def test_mouse_press_event_when_leftclick(mouse_mock):
     item = MultiSelectItem()

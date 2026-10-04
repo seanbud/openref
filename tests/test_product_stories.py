@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
@@ -76,6 +78,45 @@ def test_stroke_width_is_scaled_to_canvas_zoom(view):
     assert view.draw_current_stroke['base_size'] == 4.0
 
 
+def test_deep_zoom_pressure_does_not_inflate_stroke_width(view):
+    view.scale(1000, 1000)
+    view.enter_draw_mode()
+    view._begin_mark(QtCore.QPointF(20, 20))
+    stroke = view.draw_current_stroke
+    stroke['points'][0]['pressure'] = .1
+    painter = MagicMock()
+
+    view.draw_item._paint_stroke(painter, stroke)
+
+    pen = painter.setPen.call_args_list[-1].args[0]
+    assert pen.widthF() == pytest.approx(.0008)
+
+
+def test_completed_freehand_geometry_does_not_move_with_new_sample():
+    stroke = {
+        'tool': 'pen', 'style': 'solid',
+        'color': [255, 255, 255, 255], 'base_size': 2,
+        'points': [
+            {'x': 0, 'y': 0}, {'x': 10, 'y': 4}, {'x': 20, 'y': 0},
+        ],
+    }
+    item = BeePathItem([stroke])
+    before = item._stroke_path(stroke)
+    before_elements = [
+        (before.elementAt(index).x, before.elementAt(index).y)
+        for index in range(before.elementCount())
+    ]
+
+    stroke['points'].append({'x': 400, 'y': 300})
+    after = item._stroke_path(stroke)
+    after_prefix = [
+        (after.elementAt(index).x, after.elementAt(index).y)
+        for index in range(len(before_elements))
+    ]
+
+    assert after_prefix == before_elements
+
+
 def _image(view):
     image = QtGui.QImage(100, 80, QtGui.QImage.Format.Format_ARGB32)
     item = BeePixmapItem(image)
@@ -89,6 +130,7 @@ def _resize_event(x, y):
     event.pos.return_value = QtCore.QPointF(x, y)
     event.scenePos.return_value = QtCore.QPointF(x, y)
     event.button.return_value = Qt.MouseButton.LeftButton
+    event.modifiers.return_value = Qt.KeyboardModifier.NoModifier
     return event
 
 
@@ -337,6 +379,33 @@ def test_drop_shadow_toggles_for_text_and_drawing_with_undo(view):
     view.undo_stack.redo()
     assert note.shadow['enabled'] is True
     assert stroke.shadow['enabled'] is True
+
+
+def test_drop_shadow_can_be_toggled_off_immediately(view):
+    note = BeeTextItem('Depth')
+    view.scene.addItem(note)
+    note.setSelected(True)
+
+    assert view.scene.toggle_shadows() is True
+    assert len(view.scene._shadow_composites) == 1
+    assert view.scene.toggle_shadows() is False
+
+    assert note.shadow['enabled'] is False
+    assert view.scene._shadow_composites == {}
+
+
+def test_shadow_proxy_refreshes_while_note_text_changes(view):
+    note = BeeTextItem('Before')
+    view.scene.addItem(note)
+    note.setSelected(True)
+    view.scene.toggle_shadows()
+    composite = next(iter(view.scene._shadow_composites.values()))
+    proxy = composite.proxies[note]
+
+    with patch.object(proxy, 'update') as update:
+        note.setPlainText('After')
+
+    update.assert_called()
 
 
 def test_multiple_drawings_share_a_single_shadow_composite(view):

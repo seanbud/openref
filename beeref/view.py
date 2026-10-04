@@ -1340,7 +1340,24 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             f'Copied {len(items)} item{"s" if len(items) != 1 else ""}',
             '⎘', 'copy')
 
+    def prepare_pasted_image(self, item):
+        """Keep source pixels intact but avoid an overwhelming first view."""
+
+        zoom = max(abs(self.get_scale()), 0.0001)
+        viewport = self.viewport().size()
+        max_width = max(1.0, viewport.width() * 0.72)
+        max_height = max(1.0, viewport.height() * 0.72)
+        screen_width = max(1.0, item.width * zoom)
+        screen_height = max(1.0, item.height * zoom)
+        initial_scale = min(
+            1.0, max_width / screen_width, max_height / screen_height)
+        if initial_scale < 1.0:
+            item.setScale(initial_scale)
+        return item
+
     def on_action_paste(self):
+        if self.active_mode == self.DRAW_MODE:
+            self.exit_draw_mode(commit=True)
         if self.scene.edit_item is not None:
             self.paste_note()
             return
@@ -1363,7 +1380,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
 
         img = clipboard.image()
         if not img.isNull():
-            item = BeePixmapItem(img)
+            item = self.prepare_pasted_image(BeePixmapItem(img))
             self.undo_stack.push(commands.InsertItems(self.scene, [item], pos))
             self.show_feedback('Pasted image', '▣', 'paste')
             return

@@ -520,12 +520,13 @@ def apply_theme(app, theme='midnight'):
     """Apply an OpenRef theme to a QApplication."""
 
     theme = theme if theme in THEME_STYLESHEETS else 'midnight'
-    # Recreating the native Fusion style for every theme toggle can crash
-    # Qt 6.7's offscreen platform after several consecutive replacements.
+    # Installing or recreating the native Fusion style can crash Qt 6.7's
+    # offscreen platform after several consecutive theme changes.
     # The application is initialized with Fusion, so only install it when a
     # caller supplied a different style; updating the stylesheet is enough
     # for subsequent theme changes and preserves the existing style object.
-    if app.style().objectName().lower() != 'fusion':
+    is_offscreen = QtGui.QGuiApplication.platformName() == 'offscreen'
+    if not is_offscreen and app.style().objectName().lower() != 'fusion':
         app.setStyle('Fusion')
     app.setFont(QtGui.QFont('Helvetica', 13))
     app.setProperty('openrefTheme', theme)

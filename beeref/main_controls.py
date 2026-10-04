@@ -114,6 +114,10 @@ class MainControlsMixin:
         elif mimedata.hasImage():
             img = QtGui.QImage(mimedata.imageData())
             item = BeePixmapItem(img)
+            prepare = getattr(
+                self.control_target, 'prepare_pasted_image', None)
+            if prepare is not None:
+                prepare(item)
             pos = self.control_target.mapToScene(pos)
             self.control_target.undo_stack.push(
                 commands.InsertItems(self.control_target.scene, [item], pos))

@@ -64,6 +64,9 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
         self.assets = BeeAssets()
         self.setWindowIcon(self.assets.logo)
         self.setContentsMargins(1, 1, 1, 1)
+        self._resize_drag = None
+        self._resize_hovering = False
+        self._resize_surface = None
         self.view = BeeGraphicsView(app, self)
         default_window_size = QtCore.QSize(500, 300)
         geom = self.view.settings.value('MainWindow/geometry')
@@ -78,9 +81,13 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
         # small client-side edge zone so fullscreen restoration always leaves
         # a normally resizable window, without affecting regular title-bar
         # windows or maximized/fullscreen states.
-        self.view.viewport().installEventFilter(self)
-        self._resize_drag = None
-        self._resize_hovering = False
+        self._resize_surfaces = [
+            self.view.viewport(), self.view.window_chrome,
+            *self.view.window_chrome.findChildren(QtWidgets.QWidget),
+        ]
+        for surface in self._resize_surfaces:
+            surface.setMouseTracking(True)
+            surface.installEventFilter(self)
         self.show()
 
     def _resize_edges_at(self, global_pos):
@@ -137,7 +144,7 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
         self.setGeometry(rect)
 
     def eventFilter(self, watched, event):
-        if watched is self.view.viewport():
+        if watched in getattr(self, '_resize_surfaces', ()):
             kind = event.type()
             if kind in (QtCore.QEvent.Type.MouseMove,
                         QtCore.QEvent.Type.MouseButtonPress,
@@ -155,7 +162,9 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
                                  == QtCore.Qt.MouseButton.LeftButton)):
                         self._resize_drag = None
                         self._resize_hovering = False
-                        watched.unsetCursor()
+                        if self._resize_surface is not None:
+                            self._resize_surface.unsetCursor()
+                        self._resize_surface = None
                         event.accept()
                         return True
                 edges = self._resize_edges_at(global_pos)
@@ -165,6 +174,7 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
                     self._resize_drag = (QtCore.QRect(self.geometry()),
                                          global_pos, edges)
                     watched.setCursor(self._resize_cursor(edges))
+                    self._resize_surface = watched
                     event.accept()
                     return True
                 if kind == QtCore.QEvent.Type.MouseMove:
@@ -174,6 +184,7 @@ class BeeRefMainWindow(QtWidgets.QMainWindow):
                     elif self._resize_hovering:
                         watched.unsetCursor()
                         self._resize_hovering = False
+                        self._resize_surface = None
         return super().eventFilter(watched, event)
 
     def closeEvent(self, event):

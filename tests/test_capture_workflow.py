@@ -130,7 +130,8 @@ def test_format_shortcuts_can_be_rebound(view, qtbot):
     assert note.textCursor().charFormat().fontUnderline()
 
 
-def test_pasted_image_uses_native_dimensions_without_camera_fit(view, qtbot):
+def test_pasted_image_keeps_source_pixels_with_bounded_initial_size(
+        view, qtbot):
     image = QtGui.QImage(1920, 1080, QtGui.QImage.Format.Format_RGB32)
     image.fill(QtGui.QColor('white'))
     clipboard = MagicMock()
@@ -144,8 +145,21 @@ def test_pasted_image_uses_native_dimensions_without_camera_fit(view, qtbot):
     qtbot.wait(1)
     item = view.scene.selectedItems(user_only=True)[0]
     assert item.width == 1920 and item.height == 1080
-    assert item.scale() == 1
+    displayed_width = item.width * item.scale() * abs(view.get_scale())
+    displayed_height = item.height * item.scale() * abs(view.get_scale())
+    assert item.scale() < 1
+    assert displayed_width <= view.viewport().width() * .72 + 1
+    assert displayed_height <= view.viewport().height() * .72 + 1
     assert view.transform() == transform
+
+
+def test_note_round_trip_preserves_leading_spaces_and_tabs(qapp):
+    text = '  indented\n\tTabbed\n    nested'
+    note = BeeTextItem(text)
+
+    restored = BeeTextItem(**note.text_state())
+
+    assert restored.toPlainText() == text
 
 
 def test_note_controls_hide_without_a_text_selection(view, qtbot):
