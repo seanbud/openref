@@ -1325,8 +1325,11 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         self.temp_stroke = None
         self.erase_preview_indexes = set()
         self._cached_rect = QtCore.QRectF(0, 0, 1, 1)
+        self._stroke_body_path_cache = []
+        self._stroke_arrow_path_cache = []
         self._stroke_path_cache = []
         self._stroke_bounds_cache = []
+        self._selection_shape_cache = None
         self._eraser_hit_cache = {}
         self.init_selectable()
         self.shadow = BeeTextItem._normalized_shadow(shadow)
@@ -1378,8 +1381,12 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
     def paint_shadow_subject(self, painter):
         """Paint drawing content only; selection handles stay on the item."""
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        for stroke in self.strokes:
-            self._paint_stroke(painter, stroke)
+        self._ensure_stroke_cache()
+        for index, stroke in enumerate(self.strokes):
+            self._paint_stroke(
+                painter, stroke,
+                self._stroke_body_path_cache[index],
+                self._stroke_arrow_path_cache[index])
 
     def bounding_rect_unselected(self):
         rect = QtCore.QRectF(self._cached_rect)
@@ -1407,16 +1414,23 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
 
     def _rebuild_stroke_cache(self):
         """Cache smoothed paths and broad-phase bounds for hit testing."""
+        self._stroke_body_path_cache = []
+        self._stroke_arrow_path_cache = []
         self._stroke_path_cache = []
         self._stroke_bounds_cache = []
+        self._selection_shape_cache = None
         self._eraser_hit_cache = {}
         for stroke in self.strokes:
-            path = self._stroke_path(stroke)
-            path.addPath(self._arrow_path(stroke))
+            body_path = self._stroke_path(stroke)
+            arrow_path = self._arrow_path(stroke)
+            path = QtGui.QPainterPath(body_path)
+            path.addPath(arrow_path)
             width = self._effective_width(stroke)
             margin = width / 2 + 3
             bounds = path.boundingRect().marginsAdded(
                 QtCore.QMarginsF(margin, margin, margin, margin))
+            self._stroke_body_path_cache.append(body_path)
+            self._stroke_arrow_path_cache.append(arrow_path)
             self._stroke_path_cache.append(path)
             self._stroke_bounds_cache.append(bounds)
 
@@ -1508,8 +1522,11 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
     def _update_bounding_rect(self):
         if not self.strokes:
             self._cached_rect = QtCore.QRectF(0, 0, 1, 1)
+            self._stroke_body_path_cache = []
+            self._stroke_arrow_path_cache = []
             self._stroke_path_cache = []
             self._stroke_bounds_cache = []
+            self._selection_shape_cache = None
             self._eraser_hit_cache = {}
             return
         self._rebuild_stroke_cache()
@@ -1519,7 +1536,8 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         self._cached_rect = (
             rect if not rect.isNull() else QtCore.QRectF(0, 0, 1, 1))
 
-    def _paint_stroke(self, painter, stroke):
+    def _paint_stroke(self, painter, stroke, body_path=None,
+                      arrow_path=None):
         color_data = stroke.get('color', [235, 235, 238, 255])
         color = QtGui.QColor(*color_data)
         base_size = self._effective_width(stroke)
@@ -1545,13 +1563,16 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
             # stroke at deep zoom; clamp pressure, not canvas width.
             pen.setWidthF(max(0.0001, base_size * max(0.05, pressure)))
             painter.setPen(pen)
-        painter.drawPath(self._stroke_path(stroke))
+        if body_path is None:
+            body_path = self._stroke_path(stroke)
+        painter.drawPath(body_path)
 
-        arrow = self._arrow_path(stroke)
-        if not arrow.isEmpty():
+        if arrow_path is None:
+            arrow_path = self._arrow_path(stroke)
+        if not arrow_path.isEmpty():
             pen.setStyle(Qt.PenStyle.SolidLine)
             painter.setPen(pen)
-            painter.drawPath(arrow)
+            painter.drawPath(arrow_path)
 
     def stroke_indexes_at(self, point, radius, skip_indexes=()):
         """Return marks intersecting an eraser centered on ``point``."""
@@ -1610,10 +1631,7 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         self.update()
         return True
 
-    def shape(self):
-        if self.has_selection_handles():
-            return super().shape()
-        self._ensure_stroke_cache()
+    def _build_selection_shape(self):
         result = QtGui.QPainterPath()
         for index, stroke in enumerate(self.strokes):
             stroker = QtGui.QPainterPathStroker()
@@ -1622,13 +1640,25 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
                 stroker.createStroke(self._stroke_path_cache[index]))
         return result
 
+    def shape(self):
+        if self.has_selection_handles():
+            return super().shape()
+        self._ensure_stroke_cache()
+        if self._selection_shape_cache is None:
+            self._selection_shape_cache = self._build_selection_shape()
+        return QtGui.QPainterPath(self._selection_shape_cache)
+
     def paint(self, painter, option, widget):
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        self._ensure_stroke_cache()
         for index, stroke in enumerate(self.strokes):
             painter.save()
             if index in self.erase_preview_indexes:
                 painter.setOpacity(0.16)
-            self._paint_stroke(painter, stroke)
+            self._paint_stroke(
+                painter, stroke,
+                self._stroke_body_path_cache[index],
+                self._stroke_arrow_path_cache[index])
             painter.restore()
         if self.temp_stroke:
             self._paint_stroke(painter, self.temp_stroke)
@@ -1644,8 +1674,12 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         image.fill(QtCore.Qt.GlobalColor.transparent)
         painter = QtGui.QPainter(image)
         painter.translate(-rect.topLeft())
-        for stroke in self.strokes:
-            self._paint_stroke(painter, stroke)
+        self._ensure_stroke_cache()
+        for index, stroke in enumerate(self.strokes):
+            self._paint_stroke(
+                painter, stroke,
+                self._stroke_body_path_cache[index],
+                self._stroke_arrow_path_cache[index])
         painter.end()
         return image, rect
 

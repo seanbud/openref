@@ -152,6 +152,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._syncing_shadows = False
         self._suppress_shadow_sync = False
         self._shadow_rendering_suspended = False
+        self._shadow_suspension_reasons = set()
         self._shadow_composites = {}
         self._used_space_refresh_timer = QtCore.QTimer(self)
         self._used_space_refresh_timer.setSingleShot(True)
@@ -163,6 +164,8 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._clear_ongoing = True
         self._used_space_refresh_timer.stop()
         super().clear()
+        self._shadow_suspension_reasons = set()
+        self._shadow_rendering_suspended = False
         self._shadow_composites = {}
         self.used_space_rect = QtCore.QRectF()
         self.internal_clipboard = []
@@ -240,11 +243,13 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         """
         self.cancel_crop_mode()
         self.end_rubberband_mode()
+        self.resume_shadow_rendering('scene-move')
 
     def end_rubberband_mode(self):
         if self.rubberband_item.scene():
             logger.debug('Ending rubberband selection')
             self.removeItem(self.rubberband_item)
+        self.resume_shadow_rendering('rubberband')
         self.active_mode = None
 
     def cancel_crop_mode(self):
@@ -706,11 +711,14 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         if self.active_mode == self.RUBBERBAND_MODE:
             if not self.rubberband_item.scene():
                 logger.debug('Activating rubberband selection')
+                self.suspend_shadow_rendering('rubberband')
                 self.addItem(self.rubberband_item)
                 self.rubberband_item.bring_to_front()
             self.rubberband_item.fit(self.event_start, event.scenePos())
             self.setSelectionArea(self.rubberband_item.shape())
             self.views()[0].reset_previous_transform()
+        elif self.active_mode == self.MOVE_MODE:
+            self.suspend_shadow_rendering('scene-move')
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
@@ -726,6 +734,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                     commands.MoveItemsBy(self.selectedItems(),
                                          delta,
                                          ignore_first_redo=True))
+        self.resume_shadow_rendering('scene-move')
         self.active_mode = None
         super().mouseReleaseEvent(event)
 
@@ -824,6 +833,10 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 and self.multi_select_item.active_mode is None):
             self.multi_select_item.fit_selection_area(
                 self.itemsBoundingRect(selection_only=True))
+        if self.active_mode == self.RUBBERBAND_MODE:
+            # The rubberband itself emits scene changes at pointer frequency.
+            # It does not alter group membership or persistent canvas bounds.
+            return
         self.sync_groups()
         # ``changed`` fires for every paint invalidation. In particular, a
         # live pen stroke emits it for every pointer event. Geometry is synced
@@ -885,8 +898,8 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         finally:
             self._syncing_shadows = False
 
-    def suspend_shadow_rendering(self):
-        """Hide expensive shadow composites during transient view zooming.
+    def suspend_shadow_rendering(self, reason='interaction'):
+        """Hide expensive shadow composites during a transient interaction.
 
         Zoom gestures can generate many repaints while the view transform is
         changing.  Drop-shadow effects are blur passes over the full source
@@ -896,15 +909,19 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         suspended until the gesture settles.
         """
 
+        self._shadow_suspension_reasons.add(reason)
         if self._shadow_rendering_suspended:
             return
         self._shadow_rendering_suspended = True
         for composite in self._shadow_composites.values():
             composite.setVisible(False)
 
-    def resume_shadow_rendering(self):
-        """Restore shadow composites after a zoom gesture has settled."""
+    def resume_shadow_rendering(self, reason='interaction'):
+        """Restore shadows after all overlapping interactions have settled."""
 
+        self._shadow_suspension_reasons.discard(reason)
+        if self._shadow_suspension_reasons:
+            return
         if not self._shadow_rendering_suspended:
             return
         self._shadow_rendering_suspended = False

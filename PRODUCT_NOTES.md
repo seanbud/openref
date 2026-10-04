@@ -1,65 +1,46 @@
-# OpenRef roadmap
+# OpenRef product direction
 
-## 0.6 — Fast capture and rich notes (in progress)
+OpenRef's current interaction model is the product baseline. The near-term
+roadmap favors speed, reliability, and refinement of the existing board,
+drawing, notes, grouping, themes, and appearance tools over adding a second
+design system or speculative recognition features.
 
-Images retain native pixel dimensions on paste/import; insertion does not
-change the camera. New notes retain OpenRef's original compact ``Text``
-geometry while immediately entering edit mode with that label selected.
-Enter inserts a newline, Escape commits, and Ctrl/Command+Enter creates the
-next note below. Rich controls appear only while hovered text is selected;
-their compact color popover previews changes live and provides shared recent
-and pinned swatches. Markdown paste, document undo while editing, and full
-board-level undo after editing remain supported. Selecting a covered item
-also records its resulting layer promotion as an Undo/Redo operation.
+## 0.7 — Performance and scale
 
-Native boards use `.openref`. `.bee` imports preserve the original and save
-as a new `.openref` copy. Rich content and note appearance must survive copy,
-undo, save/reopen, and visual export.
+The 0.7 milestone makes dense visual boards remain responsive without
+removing capabilities or changing their final appearance. Its primary stress
+case is a board with many overlapping freehand strokes, large zoom ranges,
+and one or more shared drop shadows.
 
-Delegated packets: Terra owns the rich-note model and editing transactions;
-Luna owns the isolated contextual toolbar; Luna owns packaging associations
-and user documentation. The lead owns file safety, action/view integration,
-export, regression review, and release gates. Shared files have one owner.
+The implementation priorities are:
 
-## 0.7 — Containers and reusable appearance
+1. Reuse immutable drawing paths and selection outlines instead of rebuilding
+   them for every repaint and hit test.
+2. Suspend expensive decorative shadow passes only while the user is actively
+   zooming, panning, dragging, or drawing a selection box, then restore the
+   exact saved appearance when the interaction settles.
+3. Keep canvas bounds and group bookkeeping off pointer-move hot paths where
+   possible, while preserving persistent used-space behavior.
+4. Add regression tests for cache invalidation, overlapping interactions, and
+   final visual restoration. Avoid timing assertions that vary by hardware.
 
-Ctrl/Command+G frames selected content. Frames have optional names, automatic
-drop membership, movable contents, and independently resizable borders.
-Start with one frame level. Flat, Soft Shadow, Raised and Inset presets use
-up to two customizable shadows. Copy/Paste Appearance uses Ctrl/Command+Alt+C
-and Alt+V. Add named appearance presets and Find on Board.
+Release gates are the complete automated suite, Python 3.9–3.12 CI, Windows
+installer smoke tests, Apple Silicon application smoke tests, source archive,
+and published checksums. Performance work must preserve save compatibility,
+undo/redo, native-resolution image insertion, zoom anchoring, selection,
+eraser behavior, shadows at rest, and screen-pinned controls.
 
-## 0.8 — Drawing cleanup and symbol catalog
+## Current product principles
 
-Explicit preview/accept for polishing basic shapes or recognizing selected
-strokes. Local recognition, reversible replacements, searchable Essentials
-and Systems packs, favorites and per-pack/per-symbol enablement. Boards
-embed symbol geometry so disabling a pack never removes existing content.
+- Fast capture: paste imagery at native pixel dimensions and create editable
+  notes immediately from the keyboard.
+- Direct manipulation: selection, arrangement, grouping, drawing, resizing,
+  and canvas navigation remain reversible and spatially predictable.
+- Quiet polish: contextual controls stay out of the way, themes remain
+  optional, and transient feedback never interrupts work.
+- Open files: `.openref` remains the native format and `.bee` imports remain
+  non-destructive.
 
-One beta release per completed milestone; Windows and Apple Silicon builds,
-corresponding source, checksums, automated checks and native interaction QA
-are required. Reusable snippets, viewpoints and attached connectors follow.
-
-## Completed 0.5 interaction pass
-
-This pass groups the 19 user stories into four connected workflows:
-
-1. **Remember context:** persist the last file-dialog folder and chosen pen color
-   as application preferences. Existing board files do not need migration.
-2. **Create and draw:** reserve `Ctrl+N` (`Command+N` on macOS) for a new text
-   box, move New Board to `Ctrl+Shift+N`, scale newly drawn stroke widths by
-   the current canvas zoom, and make the hold-to-erase modifier configurable.
-3. **Arrange and transform:** selecting content raises it; direct edge and
-   corner drags scale proportionally; dragging across the opposite bound
-   mirrors it. Layer actions are available in the canvas menu.
-4. **Keep spatial context:** toolbar popovers remain anchored to the dock
-   during zoom, and Windows fullscreen right-drag restores a centered window
-   with the pointer's canvas location preserved.
-
-Release gate: all existing tests, interaction regression tests, lint, macOS
-Apple Silicon smoke build, Windows installer smoke build, source archive, and
-both published checksums. Use one beta release after the complete pass.
-
-Follow-up product considerations: a more discoverable visual arrange panel,
-per-board drawing presets, and broader physical-device QA for high-DPI mice,
-trackpads, and multi-monitor fullscreen restoration.
+Future feature work will be evaluated against real workflows after 0.7. The
+previous planned appearance-container and automatic symbol-recognition
+milestones are intentionally retired.
