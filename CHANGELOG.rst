@@ -1,3 +1,20 @@
+0.7.0 beta 2
+============
+
+Fixed
+-----
+
+* Fixed a native Qt crash when dragging a shadowed multiselection after box
+  selection. Hidden shadow proxies now freeze during the drag and synchronize
+  once on the next event-loop turn before the effect is restored.
+
+Performance
+-----------
+
+* Moving multiple shadowed drawings now coalesces proxy updates into one final
+  synchronization instead of mutating the blur layer for every item and every
+  pointer sample.
+
 0.7.0 beta 1
 ============
 

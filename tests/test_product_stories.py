@@ -469,6 +469,80 @@ def test_shadow_proxy_follows_only_its_moved_source(view):
     assert proxy.pos() == note.pos()
 
 
+def test_shadow_proxy_move_is_coalesced_until_after_drag(qtbot, view):
+    drawings = []
+    for y in (0, 20):
+        item = BeePathItem([{
+            'tool': 'line', 'style': 'solid',
+            'color': [255, 255, 255, 255], 'base_size': 4,
+            'points': [{'x': 0, 'y': y}, {'x': 80, 'y': y}],
+        }])
+        item._update_bounding_rect()
+        view.scene.addItem(item)
+        item.setSelected(True)
+        drawings.append(item)
+    view.on_action_toggle_shadow()
+    composite = next(iter(view.scene._shadow_composites.values()))
+    original_proxy_positions = {
+        item: QtCore.QPointF(composite.proxies[item].pos())
+        for item in drawings
+    }
+
+    view.scene.suspend_shadow_rendering('scene-move')
+    for index, item in enumerate(drawings):
+        item.setPos(QtCore.QPointF(40 + index * 10, 30))
+
+    assert composite.isVisible() is False
+    assert view.scene._shadow_geometry_dirty is True
+    assert all(composite.proxies[item].pos() == original_proxy_positions[item]
+               for item in drawings)
+
+    view.scene.resume_shadow_rendering('scene-move', deferred=True)
+    qtbot.waitUntil(
+        lambda: not view.scene._shadow_rendering_suspended, timeout=1000)
+
+    assert composite.isVisible() is True
+    assert view.scene._shadow_geometry_dirty is False
+    assert all(composite.proxies[item].pos() == item.pos()
+               for item in drawings)
+
+
+def test_dragging_shadowed_multiselection_restores_proxy_layer(qtbot, view):
+    drawings = []
+    for position in (QtCore.QPointF(80, 80), QtCore.QPointF(180, 130)):
+        item = BeePathItem([{
+            'tool': 'line', 'style': 'solid',
+            'color': [255, 255, 255, 255], 'base_size': 8,
+            'points': [{'x': 0, 'y': 0}, {'x': 70, 'y': 50}],
+        }])
+        item._update_bounding_rect()
+        item.setPos(position)
+        view.scene.addItem(item)
+        item.setSelected(True)
+        drawings.append(item)
+    view.on_action_toggle_shadow()
+    view.parent.show()
+    qtbot.waitUntil(lambda: view.scene.multi_select_item.scene() is not None)
+    selection = view.scene.multi_select_item
+    center = view.mapFromScene(
+        selection.mapToScene(selection.boundingRect().center()))
+    before = [QtCore.QPointF(item.pos()) for item in drawings]
+
+    qtbot.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=center)
+    qtbot.mouseMove(view.viewport(), center + QtCore.QPoint(35, 25), delay=5)
+    qtbot.mouseRelease(
+        view.viewport(), Qt.MouseButton.LeftButton,
+        pos=center + QtCore.QPoint(35, 25))
+    qtbot.waitUntil(
+        lambda: not view.scene._shadow_rendering_suspended, timeout=1000)
+
+    composite = next(iter(view.scene._shadow_composites.values()))
+    assert [item.pos() for item in drawings] != before
+    assert composite.isVisible() is True
+    assert all(composite.proxies[item].pos() == item.pos()
+               for item in drawings)
+
+
 @patch('beeref.main_controls.sys.platform', 'win32')
 def test_windows_fullscreen_drag_centers_window_at_pointer(view):
     window = view.parent
