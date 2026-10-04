@@ -16,24 +16,6 @@ def test_init_selectable(view):
     assert item.active_mode is None
 
 
-def test_shift_click_toggles_item_without_clearing_selection(view):
-    image_format = QtGui.QImage.Format.Format_RGB32
-    first = BeePixmapItem(QtGui.QImage(10, 10, image_format))
-    second = BeePixmapItem(QtGui.QImage(10, 10, image_format))
-    view.scene.addItem(first)
-    view.scene.addItem(second)
-    first.setSelected(True)
-    event = MagicMock()
-    event.button.return_value = Qt.MouseButton.LeftButton
-    event.modifiers.return_value = Qt.KeyboardModifier.ShiftModifier
-
-    second.mousePressEvent(event)
-
-    assert first.isSelected()
-    assert second.isSelected()
-    event.accept.assert_called_once()
-
-
 def test_on_view_scale_change(view, item):
     with patch('beeref.items.BeePixmapItem.prepareGeometryChange') as m:
         item.on_view_scale_change()

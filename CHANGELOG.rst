@@ -1,3 +1,13 @@
+0.6.0 beta 5
+============
+
+Fixed
+-----
+
+* Deleting a selected frame and its shadowed contents now removes the shared
+  shadow proxies as well, preventing visible but unselectable ghost objects.
+* Shift-click and Control-click now both add drawings to the current selection.
+
 0.6.0 beta 4
 ============
 
