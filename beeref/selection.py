@@ -441,17 +441,6 @@ class SelectableMixin(BaseItemMixin):
         self.unset_cursor()
 
     def mousePressEvent(self, event):
-        modifiers = event.modifiers()
-        if (event.button() == Qt.MouseButton.LeftButton
-                and isinstance(modifiers, Qt.KeyboardModifier)
-                and modifiers
-                & Qt.KeyboardModifier.ShiftModifier):
-            # Qt's graphics scene reserves Ctrl for additive selection.
-            # Mirror that familiar behavior for Shift without clearing the
-            # existing selection or accidentally beginning a move/resize.
-            self.setSelected(not self.isSelected())
-            event.accept()
-            return
         self.event_start = event.scenePos()
         self.scene().views()[0].reset_previous_transform(toggle_item=self)
         if not self.isSelected():

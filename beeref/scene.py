@@ -629,6 +629,26 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             return
 
         if event.button() == Qt.MouseButton.LeftButton:
+            modifiers = event.modifiers()
+            if (isinstance(modifiers, Qt.KeyboardModifier)
+                    and modifiers
+                    & Qt.KeyboardModifier.ShiftModifier):
+                # QGraphicsScene treats Control as additive selection but
+                # replaces the current selection for Shift before the item
+                # handler runs. Resolve the user item under overlays here so
+                # Shift-click is an equally valid additive-selection gesture.
+                item_at_pos = next((
+                    item for item in self.items(event.scenePos())
+                    if item is not self.multi_select_item
+                    and hasattr(item, 'save_id')
+                ), None)
+                if item_at_pos is not None:
+                    item_at_pos.setSelected(True)
+                    if hasattr(item_at_pos, 'bring_to_front'):
+                        self.bring_items_to_front(
+                            self.selectedItems(user_only=True))
+                    event.accept()
+                    return
             self.event_start = event.scenePos()
             item_at_pos = self.itemAt(
                 event.scenePos(), self.views()[0].transform())

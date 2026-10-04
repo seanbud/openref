@@ -117,6 +117,33 @@ def test_completed_freehand_geometry_does_not_move_with_new_sample():
     assert after_prefix == before_elements
 
 
+@pytest.mark.parametrize('modifier', [
+    Qt.KeyboardModifier.ControlModifier,
+    Qt.KeyboardModifier.ShiftModifier,
+])
+def test_modifier_click_adds_drawing_to_selection(view, qtbot, modifier):
+    center = view.mapToScene(view.viewport().rect().center())
+    drawings = []
+    for y in (-30, 30):
+        drawing = BeePathItem([{
+            'tool': 'line', 'style': 'solid',
+            'color': [255, 255, 255, 255], 'base_size': 8,
+            'points': [{'x': -30, 'y': 0}, {'x': 30, 'y': 0}],
+        }])
+        drawing._update_bounding_rect()
+        drawing.setPos(center + QtCore.QPointF(0, y))
+        view.scene.addItem(drawing)
+        drawings.append(drawing)
+    drawings[0].setSelected(True)
+
+    click_position = view.mapFromScene(drawings[1].mapToScene(
+        QtCore.QPointF(0, 0)))
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton,
+                     modifier, click_position)
+
+    assert set(view.scene.selectedItems(user_only=True)) == set(drawings)
+
+
 def _image(view):
     image = QtGui.QImage(100, 80, QtGui.QImage.Format.Format_ARGB32)
     item = BeePixmapItem(image)
