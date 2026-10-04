@@ -215,10 +215,24 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
     def addItem(self, item):
         logger.debug(f'Adding item {item}')
         super().addItem(item)
+        if self._item_has_shadow(item):
+            self.sync_shadow_composites()
 
     def removeItem(self, item):
         logger.debug(f'Removing item {item}')
+        had_shadow = self._item_has_shadow(item)
         super().removeItem(item)
+        if had_shadow:
+            self.sync_shadow_composites()
+
+    def _item_has_shadow(self, item):
+        """Return whether an item participates in a rendered shadow layer."""
+
+        return (not self._clear_ongoing
+                and not self._syncing_shadows
+                and not self._suppress_shadow_sync
+                and getattr(item, 'TYPE', None) in ('text', 'path')
+                and getattr(item, 'shadow', {}).get('enabled', False))
 
     def cancel_active_modes(self):
         """Cancels ongoing crop modes, rubberband modes etc, if there are

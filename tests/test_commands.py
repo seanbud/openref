@@ -3,7 +3,7 @@ from unittest.mock import MagicMock, patch
 from PyQt6 import QtCore, QtGui
 
 from beeref import commands
-from beeref.items import BeePixmapItem, BeeTextItem
+from beeref.items import BeeGroupItem, BeePathItem, BeePixmapItem, BeeTextItem
 
 
 def test_insert_items(view):
@@ -94,6 +94,37 @@ def test_delete_items(view):
     assert list(view.scene.items_for_save()) == [item1, item2]
     assert item1.isSelected() is False
     assert item2.isSelected() is True
+
+
+def test_delete_group_and_shadowed_members_removes_visual_proxies(view):
+    note = BeeTextItem('Grouped note')
+    drawing = BeePathItem([{
+        'tool': 'line', 'style': 'solid',
+        'color': [255, 255, 255, 255], 'base_size': 4,
+        'points': [{'x': 0, 'y': 0}, {'x': 80, 'y': 20}],
+    }])
+    drawing._update_bounding_rect()
+    group = BeeGroupItem()
+    note.group_id = group.group_id
+    drawing.group_id = group.group_id
+    for item in (note, drawing, group):
+        view.scene.addItem(item)
+        item.setSelected(True)
+    view.scene.toggle_shadows()
+    command = commands.DeleteItems(view.scene, [group, note, drawing])
+
+    command.redo()
+
+    assert list(view.scene.items_for_save()) == []
+    assert view.scene._shadow_composites == {}
+    assert view.scene.items() == []
+
+    command.undo()
+
+    assert set(view.scene.items_for_save()) == {group, note, drawing}
+    assert len(view.scene._shadow_composites) == 1
+    composite = next(iter(view.scene._shadow_composites.values()))
+    assert set(composite.proxies) == {note, drawing}
 
 
 def test_move_items_by(qapp):
