@@ -373,6 +373,40 @@ def test_group_shortcut_creates_movable_persistent_frame(qtbot, view):
     assert len(list(view.scene.items_by_type('group'))) == 1
 
 
+def test_new_mixed_group_drag_moves_every_member_by_same_delta(qtbot, view):
+    note = BeeTextItem('Mixed group')
+    note.setPos(80, 90)
+    view.scene.addItem(note)
+    image = _image(view)
+    image.setPos(190, 135)
+    note.setSelected(True)
+    image.setSelected(True)
+    view.on_action_group_selection()
+    group = next(iter(view.scene.items_by_type('group')))
+    # A box-selection naturally includes both the frame and its contents.
+    note.setSelected(True)
+    image.setSelected(True)
+    view.scene.collapse_selected_group_members()
+    view.parent.show()
+    before = {
+        item: QtCore.QPointF(item.scenePos()) for item in (note, image, group)}
+    # Grab the frame itself immediately after grouping, not either member.
+    start = view.mapFromScene(group.mapToScene(QtCore.QPointF(8, 0)))
+    finish = start + QtCore.QPoint(45, 30)
+
+    qtbot.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    for step in range(1, 16):
+        qtbot.mouseMove(
+            view.viewport(),
+            start + QtCore.QPoint(step * 3, step * 2), delay=1)
+    qtbot.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=finish)
+
+    deltas = [item.scenePos() - before[item]
+              for item in (note, image, group)]
+    assert deltas[0] == deltas[1] == deltas[2]
+    assert deltas[0] != QtCore.QPointF()
+
+
 def test_drop_shadow_toggles_for_text_and_drawing_with_undo(view):
     note = BeeTextItem('Depth')
     stroke = BeePathItem([{
@@ -406,6 +440,65 @@ def test_drop_shadow_toggles_for_text_and_drawing_with_undo(view):
     view.undo_stack.redo()
     assert note.shadow['enabled'] is True
     assert stroke.shadow['enabled'] is True
+
+
+def test_drop_shadow_supports_images_and_round_trips_in_copy(view):
+    image = BeePixmapItem(QtGui.QImage(
+        24, 18, QtGui.QImage.Format.Format_ARGB32))
+    view.scene.addItem(image)
+    image.setSelected(True)
+
+    assert view.scene.toggle_shadows() is True
+    composite = next(iter(view.scene._shadow_composites.values()))
+    assert set(composite.proxies) == {image}
+    assert image.graphicsEffect() is None
+    assert image.get_extra_save_data()['shadow']['enabled'] is True
+    assert image.create_copy().shadow == image.shadow
+
+
+def test_align_edges_is_one_undoable_operation(view):
+    left = BeeTextItem('left')
+    right = BeeTextItem('right')
+    left.setPos(10, 10)
+    right.setPos(90, 45)
+    view.scene.addItem(left)
+    view.scene.addItem(right)
+    left.setSelected(True)
+    right.setSelected(True)
+    before = (QtCore.QPointF(left.pos()), QtCore.QPointF(right.pos()))
+
+    assert view.scene.align_selection('left') is True
+    assert left.sceneBoundingRect().left() == pytest.approx(
+        right.sceneBoundingRect().left())
+    view.undo_stack.undo()
+    assert left.pos() == before[0]
+    assert right.pos() == before[1]
+    view.undo_stack.redo()
+    assert left.sceneBoundingRect().left() == pytest.approx(
+        right.sceneBoundingRect().left())
+
+
+def test_standalone_web_link_is_formatted_and_opens_on_control_click(view):
+    note = BeeTextItem('https://openref.example/docs')
+    view.scene.addItem(note)
+    note.enter_edit_mode()
+    enter = QtGui.QKeyEvent(
+        QtCore.QEvent.Type.KeyPress, Qt.Key.Key_Return,
+        Qt.KeyboardModifier.NoModifier, '\n')
+    note.keyPressEvent(enter)
+    cursor = QtGui.QTextCursor(note.document())
+    cursor.setPosition(1)
+    assert cursor.charFormat().isAnchor()
+    assert cursor.charFormat().anchorHref() == 'https://openref.example/docs'
+
+    click = MagicMock()
+    click.modifiers.return_value = Qt.KeyboardModifier.ControlModifier
+    with patch.object(QtGui.QDesktopServices, 'openUrl',
+                      return_value=True) as open_url:
+        note.mousePressEvent(click)
+    open_url.assert_called_once_with(
+        QtCore.QUrl('https://openref.example/docs'))
+    click.accept.assert_called_once()
 
 
 def test_drop_shadow_can_be_toggled_off_immediately(view):

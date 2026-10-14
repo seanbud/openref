@@ -26,6 +26,7 @@ import math
 import os.path
 import re
 import uuid
+from urllib.parse import urlparse
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
@@ -39,6 +40,29 @@ from beeref.selection import SelectableMixin
 logger = logging.getLogger(__name__)
 
 item_registry = {}
+
+DEFAULT_SHADOW = {
+    'enabled': False,
+    'color': '#99000000',
+    'blur': 12.0,
+    'offset_x': 0.0,
+    'offset_y': 5.0,
+    'group_id': None,
+}
+
+
+def normalized_shadow(shadow):
+    value = dict(DEFAULT_SHADOW, **(shadow or {}))
+    color = QtGui.QColor(value.get('color'))
+    value['color'] = (color.name(QtGui.QColor.NameFormat.HexArgb)
+                      if color.isValid() else DEFAULT_SHADOW['color'])
+    value['enabled'] = bool(value.get('enabled', False))
+    value['blur'] = max(0.0, float(value.get('blur', 12.0)))
+    value['offset_x'] = float(value.get('offset_x', 0.0))
+    value['offset_y'] = float(value.get('offset_y', 5.0))
+    group_id = value.get('group_id')
+    value['group_id'] = str(group_id) if group_id else None
+    return value
 
 
 def register_item(cls):
@@ -130,6 +154,8 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         self.init_selectable()
         self.settings = BeeSettings()
         self.grayscale = False
+        self.shadow = normalized_shadow(kwargs.get('shadow'))
+        self.setGraphicsEffect(None)
 
     @classmethod
     def create_from_data(self, **kwargs):
@@ -140,7 +166,24 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             item.crop = QtCore.QRectF(*data['crop'])
         item.setOpacity(data.get('opacity', 1))
         item.grayscale = data.get('grayscale', False)
+        item.shadow = normalized_shadow(data.get('shadow'))
         return item
+
+    def set_shadow(self, shadow):
+        self.shadow = normalized_shadow(shadow)
+        self.setGraphicsEffect(None)
+        self.update()
+        if (self.scene() is not None
+                and not getattr(self.scene(), '_suppress_shadow_sync', False)):
+            self.scene().sync_shadow_composites()
+
+    def paint_shadow_subject(self, painter):
+        """Paint only image pixels, excluding selection and crop controls."""
+
+        if abs(painter.combinedTransform().m11()) < 2:
+            painter.setRenderHint(painter.RenderHint.SmoothPixmapTransform)
+        pixmap = self._grayscale_pixmap if self.grayscale else self.pixmap()
+        painter.drawPixmap(self.crop, pixmap, self.crop)
 
     def __str__(self):
         size = self.pixmap().size()
@@ -156,6 +199,7 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         self.prepareGeometryChange()
         self._crop = value
         self.update()
+        self._sync_shadow_if_needed(force=True)
 
     @property
     def grayscale(self):
@@ -203,6 +247,7 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             self._grayscale_pixmap = None
 
         self.update()
+        self._sync_shadow_if_needed(force=True)
 
     def sample_color_at(self, pos):
         ipos = self.mapFromScene(pos)
@@ -227,13 +272,16 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
             return self.crop
 
     def get_extra_save_data(self):
-        return {'filename': self.filename,
+        data = {'filename': self.filename,
                 'opacity': self.opacity(),
                 'grayscale': self.grayscale,
                 'crop': [self.crop.topLeft().x(),
                          self.crop.topLeft().y(),
                          self.crop.width(),
                          self.crop.height()]}
+        if self.shadow != DEFAULT_SHADOW:
+            data['shadow'] = copy.deepcopy(self.shadow)
+        return data
 
     def get_filename_for_export(self, imgformat, save_id_default=None):
         save_id = self.save_id or save_id_default
@@ -282,6 +330,7 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
     def setPixmap(self, pixmap):
         super().setPixmap(pixmap)
         self.reset_crop()
+        self._sync_shadow_if_needed(force=True)
 
     def pixmap_from_bytes(self, data):
         """Set image pimap from a bytestring."""
@@ -298,6 +347,7 @@ class BeePixmapItem(BeeItemMixin, QtWidgets.QGraphicsPixmapItem):
         item.setRotation(self.rotation())
         item.setOpacity(self.opacity())
         item.grayscale = self.grayscale
+        item.shadow = copy.deepcopy(self.shadow)
         if self.flip() == -1:
             item.do_flip()
         item.crop = self.crop
@@ -679,8 +729,9 @@ class _SafeNoteHTML(HTMLParser):
         if tag not in self.TAGS:
             return
         attrs = dict(attrs)
-        # Links retain their readable label only.  Allow a text colour, but no
-        # arbitrary CSS (which Qt accepts more broadly than browsers do).
+        # Pasted links retain their readable label only. Standalone links are
+        # recognized locally from their visible URL rather than trusting an
+        # arbitrary clipboard destination.
         if tag == 'span':
             style = _safe_css_style(attrs.get('style', ''))
             attrs = {'style': style} if style else {}
@@ -733,6 +784,19 @@ class _SafeNoteHTML(HTMLParser):
 
 def _valid_color(value):
     return bool(value) and QtGui.QColor(value).isValid()
+
+
+def _safe_web_url(value):
+    """Return a standalone HTTP(S) URL, or ``None``."""
+
+    value = (value or '').strip()
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return None
+    if parsed.scheme.lower() not in ('http', 'https') or not parsed.netloc:
+        return None
+    return value
 
 
 def _safe_css_color(style):
@@ -817,17 +881,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         # the familiar compact square-backed label.
         'radius': 0,
     }
-    DEFAULT_SHADOW = {
-        'enabled': False,
-        'color': '#99000000',
-        'blur': 12.0,
-        'offset_x': 0.0,
-        'offset_y': 5.0,
-        # Items that share this identifier are painted by one shadow
-        # composite. This prevents overlapping selected drawings from each
-        # casting their own seam-filled shadow.
-        'group_id': None,
-    }
+    DEFAULT_SHADOW = DEFAULT_SHADOW
 
     def __init__(self, text=None, html=None, font_size=None,
                  text_width=None, appearance=None, shadow=None, **kwargs):
@@ -910,18 +964,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
 
     @classmethod
     def _normalized_shadow(cls, shadow):
-        shadow = dict(cls.DEFAULT_SHADOW, **(shadow or {}))
-        color = QtGui.QColor(shadow.get('color'))
-        shadow['color'] = color.name(QtGui.QColor.NameFormat.HexArgb)
-        if not color.isValid():
-            shadow['color'] = cls.DEFAULT_SHADOW['color']
-        shadow['enabled'] = bool(shadow.get('enabled', False))
-        shadow['blur'] = max(0.0, float(shadow.get('blur', 12.0)))
-        shadow['offset_x'] = float(shadow.get('offset_x', 0.0))
-        shadow['offset_y'] = float(shadow.get('offset_y', 5.0))
-        group_id = shadow.get('group_id')
-        shadow['group_id'] = str(group_id) if group_id else None
-        return shadow
+        return normalized_shadow(shadow)
 
     def _apply_shadow_effect(self):
         # Effects attached to the live item also receive selection outlines
@@ -1007,6 +1050,15 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
     def contains(self, point):
         return self.boundingRect().contains(point)
 
+    def standalone_link_url(self):
+        return _safe_web_url(self.toPlainText())
+
+    def boundingRect(self):
+        rect = QtWidgets.QGraphicsTextItem.boundingRect(self)
+        if self.standalone_link_url():
+            rect.adjust(0, 0, 18, 0)
+        return rect
+
     def paint(self, painter, option, widget):
         rect = QtWidgets.QGraphicsTextItem.boundingRect(self)
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing, True)
@@ -1024,7 +1076,31 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             max(0, self.appearance['radius'] - inset))
         option.state = QtWidgets.QStyle.StateFlag.State_Enabled
         super().paint(painter, option, widget)
+        if self.standalone_link_url():
+            # A font-independent chain affordance without changing the URL.
+            base = QtWidgets.QGraphicsTextItem.boundingRect(self)
+            painter.save()
+            painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+            pen = QtGui.QPen(QtGui.QColor('#4d9cff'), 1.7)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            center_y = base.top() + min(12.0, base.height() / 2)
+            painter.drawEllipse(QtCore.QRectF(
+                base.right() + 2, center_y - 4, 9, 6))
+            painter.drawEllipse(QtCore.QRectF(
+                base.right() + 7, center_y - 1, 9, 6))
+            painter.restore()
         self.paint_selectable(painter, option, widget)
+
+    def mousePressEvent(self, event):
+        url = self.standalone_link_url()
+        if (url and event.modifiers()
+                & (Qt.KeyboardModifier.ControlModifier
+                   | Qt.KeyboardModifier.MetaModifier)):
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
     def create_copy(self):
         item = BeeTextItem(**self.text_state())
@@ -1253,6 +1329,20 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
                 create_below(self)
             event.accept()
             return
+        if (event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return)
+                and modifiers == Qt.KeyboardModifier.NoModifier
+                and self.standalone_link_url()):
+            cursor = QtGui.QTextCursor(self.document())
+            cursor.select(QtGui.QTextCursor.SelectionType.Document)
+            link_format = QtGui.QTextCharFormat()
+            link_format.setAnchor(True)
+            link_format.setAnchorHref(self.standalone_link_url())
+            link_format.setForeground(QtGui.QColor('#4d9cff'))
+            link_format.setFontUnderline(True)
+            cursor.mergeCharFormat(link_format)
+            cursor.clearSelection()
+            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+            self.setTextCursor(cursor)
         # Enter is a normal rich-text newline. Escape is a convenient commit,
         # not a cancellation, so an editing session maps to board undo once.
         if (event.key() == Qt.Key.Key_Escape
@@ -1764,7 +1854,12 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
             delta = value - self.pos()
             if not delta.isNull():
                 for member in self.members():
-                    member.moveBy(delta.x(), delta.y())
+                    # Qt already moves selected members during a multi-item
+                    # drag. Carry only unselected members here so a box that
+                    # includes both frame and contents cannot double-move
+                    # them or amplify mixed text/image transforms.
+                    if not member.isSelected():
+                        member.moveBy(delta.x(), delta.y())
         return super().itemChange(change, value)
 
     def has_selection_handles(self):
@@ -1772,11 +1867,11 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         return False
 
     def shape(self):
-        outer = QtGui.QPainterPath()
-        outer.addRect(self._rect)
-        inner = QtGui.QPainterPath()
-        inner.addRect(self._rect.adjusted(6, 6, -6, -6))
-        ring = outer.subtracted(inner)
+        # The frame sits behind its members, so making the empty interior a
+        # hit target does not steal clicks from content. It does make groups
+        # far easier to select and drag than a one-pixel outline.
+        ring = QtGui.QPainterPath()
+        ring.addRect(self._rect)
         if self.title:
             ring.addRect(QtCore.QRectF(0, -24, self._rect.width(), 24))
         return ring

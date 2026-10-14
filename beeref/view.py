@@ -149,6 +149,16 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             control.installEventFilter(self)
         self.draw_toolbar.hide()
         self.init_note_tools()
+        self.selection_modifier_badge = QtWidgets.QLabel(self.viewport())
+        self.selection_modifier_badge.setFixedSize(18, 18)
+        self.selection_modifier_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.selection_modifier_badge.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.selection_modifier_badge.setStyleSheet(
+            'QLabel { color: #f6f7fb; background: rgba(25, 27, 32, 220); '
+            'border: 1px solid rgba(255, 255, 255, 45); '
+            'border-radius: 9px; font: 600 13px; }')
+        self.selection_modifier_badge.hide()
         self.eraser_trail = widgets.modern_ui.EraserTrailOverlay(
             self.viewport())
         self.eraser_trail.stackUnder(self.draw_toolbar)
@@ -299,6 +309,36 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
 
     def on_context_menu(self, point):
         self.context_menu.exec(self.mapToGlobal(point))
+
+    def _update_selection_modifier_badge(self, modifiers, position=None):
+        """Show whether a marquee will add to or subtract from selection."""
+
+        if self.active_mode == self.DRAW_MODE or self.scene.edit_item:
+            self.selection_modifier_badge.hide()
+            return
+        if not isinstance(modifiers, Qt.KeyboardModifier):
+            self.selection_modifier_badge.hide()
+            return
+        symbol = None
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            symbol = '+'
+        elif modifiers & Qt.KeyboardModifier.AltModifier:
+            symbol = '−'
+        if symbol is None:
+            self.selection_modifier_badge.hide()
+            return
+        if position is None:
+            position = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
+        else:
+            position = position.toPoint() if hasattr(position, 'toPoint') else position
+        x = min(max(0, position.x() + 14),
+                max(0, self.viewport().width() - 18))
+        y = min(max(0, position.y() + 14),
+                max(0, self.viewport().height() - 18))
+        self.selection_modifier_badge.setText(symbol)
+        self.selection_modifier_badge.setGeometry(x, y, 18, 18)
+        self.selection_modifier_badge.show()
+        self.selection_modifier_badge.raise_()
 
     def get_supported_image_formats(self, cls):
         formats = []
@@ -606,6 +646,23 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
     def on_action_arrange_square(self):
         self.scene.arrange_square()
         self.show_feedback('Arranged in a grid', '▦', 'arrange_square')
+
+    def _align_selection(self, edge, icon):
+        if self.scene.align_selection(edge):
+            self.show_feedback(f'Aligned {edge} edges', icon,
+                               f'align_{edge}')
+
+    def on_action_align_left(self):
+        self._align_selection('left', '⇤')
+
+    def on_action_align_right(self):
+        self._align_selection('right', '⇥')
+
+    def on_action_align_top(self):
+        self._align_selection('top', '↥')
+
+    def on_action_align_bottom(self):
+        self._align_selection('bottom', '↧')
 
     def on_action_change_opacity(self):
         images = list(filter(
@@ -1879,6 +1936,8 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        self._update_selection_modifier_badge(
+            event.modifiers(), event.position())
         if self._right_canvas_pending:
             pos = event.position()
             if ((pos - self.event_start).manhattanLength() >= 6
@@ -2057,6 +2116,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self._hud_toast.reposition()
 
     def keyPressEvent(self, event):
+        self._update_selection_modifier_badge(event.modifiers())
         note_action = self.note_key_action(event)
         if note_action:
             if note_action == 'native':
@@ -2131,6 +2191,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
+        self._update_selection_modifier_badge(event.modifiers())
         if (self.active_mode == self.DRAW_MODE
                 and self._temporary_eraser_tool is not None
                 and event.key()

@@ -16,7 +16,7 @@ class NoteEditingMixin:
             return None
         sequence = QtGui.QKeySequence(event.keyCombination())
         for action_id in ('note_bold', 'note_italic', 'note_underline',
-                          'note_strike', 'paste', 'paste_plain',
+                          'note_strike', 'note_color', 'paste', 'paste_plain',
                           'paste_markdown', 'undo', 'redo'):
             definition = actions.actions[action_id]
             if any(sequence == QtGui.QKeySequence(shortcut)
@@ -172,8 +172,17 @@ class NoteEditingMixin:
         self.format_note('strike')
 
     def on_action_note_color(self):
-        if self.active_note():
-            self.note_toolbar._choose_text_color()
+        note = self.active_note()
+        if note is None or not note.edit_mode or not (
+                note.textCursor().hasSelection()):
+            return
+        self._note_toolbar_hide_timer.stop()
+        self.note_toolbar.set_state(note.format_state())
+        rect = self.mapFromScene(note.sceneBoundingRect()).boundingRect()
+        self.note_toolbar.reposition_for_rect(rect)
+        self.note_toolbar.show()
+        self.note_toolbar.raise_()
+        self.note_toolbar._choose_text_color()
 
     def on_action_note_appearance(self):
         if self.active_note():

@@ -185,7 +185,18 @@ class MoveItemsBy(QtGui.QUndoCommand):
 
     def __init__(self, items, delta, ignore_first_redo=False):
         super().__init__('Move items')
-        self.items = items
+        items = list(items)
+        selected_group_ids = {
+            item.group_id for item in items
+            if getattr(item, 'TYPE', None) == 'group'}
+        # A box selection can contain a group frame and its members. Moving
+        # both records the member twice because moving the frame already
+        # carries all of its contents. Keep one authoritative move owner.
+        self.items = [
+            item for item in items
+            if (getattr(item, 'TYPE', None) == 'group'
+                or getattr(item, 'group_id', None)
+                not in selected_group_ids)]
         self.delta = delta
         self.ignore_first_redo = ignore_first_redo
 
@@ -199,6 +210,28 @@ class MoveItemsBy(QtGui.QUndoCommand):
     def undo(self):
         for item in self.items:
             item.moveBy(-self.delta.x(), -self.delta.y())
+
+
+class SetItemPositions(QtGui.QUndoCommand):
+    """Move canonical board items to exact positions as one undo step."""
+
+    def __init__(self, scene, before, after, text='Align items'):
+        super().__init__(text)
+        self.scene = scene
+        self.before = before
+        self.after = after
+
+    def _apply(self, positions):
+        for item, position in positions.items():
+            item.setPos(position)
+        self.scene.sync_groups()
+        self.scene.schedule_used_space_refresh()
+
+    def redo(self):
+        self._apply(self.after)
+
+    def undo(self):
+        self._apply(self.before)
 
 
 class ScaleItemsBy(QtGui.QUndoCommand):
