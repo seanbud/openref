@@ -117,6 +117,56 @@ class GroupItems(QtGui.QUndoCommand):
             item.setSelected(True)
 
 
+class ChangeGroupMembership(QtGui.QUndoCommand):
+    """Add, remove, or transfer board items between persistent groups."""
+
+    def __init__(self, scene, changes, text='Change group membership'):
+        super().__init__(text)
+        self.scene = scene
+        self.before = {item: old for item, (old, new) in changes.items()}
+        self.after = {item: new for item, (old, new) in changes.items()}
+
+    def _apply(self, states):
+        for item, group_id in states.items():
+            item.group_id = group_id
+        self.scene.sync_groups()
+        self.scene.schedule_used_space_refresh()
+
+    def redo(self):
+        self._apply(self.after)
+
+    def undo(self):
+        self._apply(self.before)
+
+
+class ChangeGroupStyle(QtGui.QUndoCommand):
+    """Undoable group title and visual styling, mergeable while editing."""
+
+    COMMAND_ID = 3107
+
+    def __init__(self, group, before, after):
+        super().__init__('Style group')
+        self.group = group
+        self.before = dict(before)
+        self.after = dict(after)
+
+    def id(self):
+        return self.COMMAND_ID
+
+    def mergeWith(self, other):
+        if not isinstance(other, ChangeGroupStyle) or other.group is not (
+                self.group):
+            return False
+        self.after = dict(other.after)
+        return True
+
+    def redo(self):
+        self.group.apply_style(self.after)
+
+    def undo(self):
+        self.group.apply_style(self.before)
+
+
 class ChangeShadows(QtGui.QUndoCommand):
     """Apply a saved shadow state without flattening editable items."""
 
@@ -185,7 +235,18 @@ class MoveItemsBy(QtGui.QUndoCommand):
 
     def __init__(self, items, delta, ignore_first_redo=False):
         super().__init__('Move items')
-        self.items = items
+        items = list(items)
+        selected_group_ids = {
+            item.group_id for item in items
+            if getattr(item, 'TYPE', None) == 'group'}
+        # A box selection can contain a group frame and its members. Moving
+        # both records the member twice because moving the frame already
+        # carries all of its contents. Keep one authoritative move owner.
+        self.items = [
+            item for item in items
+            if (getattr(item, 'TYPE', None) == 'group'
+                or getattr(item, 'group_id', None)
+                not in selected_group_ids)]
         self.delta = delta
         self.ignore_first_redo = ignore_first_redo
 
@@ -199,6 +260,28 @@ class MoveItemsBy(QtGui.QUndoCommand):
     def undo(self):
         for item in self.items:
             item.moveBy(-self.delta.x(), -self.delta.y())
+
+
+class SetItemPositions(QtGui.QUndoCommand):
+    """Move canonical board items to exact positions as one undo step."""
+
+    def __init__(self, scene, before, after, text='Align items'):
+        super().__init__(text)
+        self.scene = scene
+        self.before = before
+        self.after = after
+
+    def _apply(self, positions):
+        for item, position in positions.items():
+            item.setPos(position)
+        self.scene.sync_groups()
+        self.scene.schedule_used_space_refresh()
+
+    def redo(self):
+        self._apply(self.after)
+
+    def undo(self):
+        self._apply(self.before)
 
 
 class ScaleItemsBy(QtGui.QUndoCommand):

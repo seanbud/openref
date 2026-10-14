@@ -7,6 +7,7 @@ import pytest
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 
+from beeref import commands
 from beeref.actions import actions
 from beeref.items import BeeGroupItem, BeePathItem, BeePixmapItem, BeeTextItem
 
@@ -373,6 +374,40 @@ def test_group_shortcut_creates_movable_persistent_frame(qtbot, view):
     assert len(list(view.scene.items_by_type('group'))) == 1
 
 
+def test_new_mixed_group_drag_moves_every_member_by_same_delta(qtbot, view):
+    note = BeeTextItem('Mixed group')
+    note.setPos(80, 90)
+    view.scene.addItem(note)
+    image = _image(view)
+    image.setPos(190, 135)
+    note.setSelected(True)
+    image.setSelected(True)
+    view.on_action_group_selection()
+    group = next(iter(view.scene.items_by_type('group')))
+    # A box-selection naturally includes both the frame and its contents.
+    note.setSelected(True)
+    image.setSelected(True)
+    view.scene.collapse_selected_group_members()
+    view.parent.show()
+    before = {
+        item: QtCore.QPointF(item.scenePos()) for item in (note, image, group)}
+    # Grab the frame itself immediately after grouping, not either member.
+    start = view.mapFromScene(group.mapToScene(QtCore.QPointF(8, 0)))
+    finish = start + QtCore.QPoint(45, 30)
+
+    qtbot.mousePress(view.viewport(), Qt.MouseButton.LeftButton, pos=start)
+    for step in range(1, 16):
+        qtbot.mouseMove(
+            view.viewport(),
+            start + QtCore.QPoint(step * 3, step * 2), delay=1)
+    qtbot.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton, pos=finish)
+
+    deltas = [item.scenePos() - before[item]
+              for item in (note, image, group)]
+    assert deltas[0] == deltas[1] == deltas[2]
+    assert deltas[0] != QtCore.QPointF()
+
+
 def test_drop_shadow_toggles_for_text_and_drawing_with_undo(view):
     note = BeeTextItem('Depth')
     stroke = BeePathItem([{
@@ -406,6 +441,176 @@ def test_drop_shadow_toggles_for_text_and_drawing_with_undo(view):
     view.undo_stack.redo()
     assert note.shadow['enabled'] is True
     assert stroke.shadow['enabled'] is True
+
+
+def test_drop_shadow_supports_images_and_round_trips_in_copy(view):
+    image = BeePixmapItem(QtGui.QImage(
+        24, 18, QtGui.QImage.Format.Format_ARGB32))
+    view.scene.addItem(image)
+    image.setSelected(True)
+
+    assert view.scene.toggle_shadows() is True
+    composite = next(iter(view.scene._shadow_composites.values()))
+    assert set(composite.proxies) == {image}
+    assert image.graphicsEffect() is None
+    assert image.get_extra_save_data()['shadow']['enabled'] is True
+    assert image.create_copy().shadow == image.shadow
+
+
+def test_align_edges_is_one_undoable_operation(view):
+    left = BeeTextItem('left')
+    right = BeeTextItem('right')
+    left.setPos(10, 10)
+    right.setPos(90, 45)
+    view.scene.addItem(left)
+    view.scene.addItem(right)
+    left.setSelected(True)
+    right.setSelected(True)
+    before = (QtCore.QPointF(left.pos()), QtCore.QPointF(right.pos()))
+
+    assert view.scene.align_selection('left') is True
+    assert left.sceneBoundingRect().left() == pytest.approx(
+        right.sceneBoundingRect().left())
+    view.undo_stack.undo()
+    assert left.pos() == before[0]
+    assert right.pos() == before[1]
+    view.undo_stack.redo()
+    assert left.sceneBoundingRect().left() == pytest.approx(
+        right.sceneBoundingRect().left())
+
+
+def test_standalone_web_link_is_formatted_and_opens_on_control_click(view):
+    note = BeeTextItem('https://openref.example/docs')
+    view.scene.addItem(note)
+    assert note.active_link_url() is None
+    note.enter_edit_mode()
+    enter = QtGui.QKeyEvent(
+        QtCore.QEvent.Type.KeyPress, Qt.Key.Key_Return,
+        Qt.KeyboardModifier.NoModifier, '\n')
+    note.keyPressEvent(enter)
+    cursor = QtGui.QTextCursor(note.document())
+    cursor.setPosition(1)
+    assert cursor.charFormat().isAnchor()
+    assert cursor.charFormat().anchorHref() == 'https://openref.example/docs'
+    assert note.active_link_url() == 'https://openref.example/docs'
+    restored = BeeTextItem.create_from_data(data=note.get_extra_save_data())
+    assert restored.active_link_url() == 'https://openref.example/docs'
+
+    click = MagicMock()
+    click.modifiers.return_value = Qt.KeyboardModifier.ControlModifier
+    with patch.object(QtGui.QDesktopServices, 'openUrl',
+                      return_value=True) as open_url:
+        note.mousePressEvent(click)
+    open_url.assert_called_once_with(
+        QtCore.QUrl('https://openref.example/docs'))
+    click.accept.assert_called_once()
+
+
+def test_shift_marquee_adds_to_existing_selection(qtbot, view):
+    first = BeeTextItem('first')
+    second = BeeTextItem('second')
+    first.setPos(20, 40)
+    second.setPos(300, 40)
+    view.scene.addItem(first)
+    view.scene.addItem(second)
+    first.setSelected(True)
+    view.parent.show()
+    start = view.mapFromScene(QtCore.QPointF(260, 5))
+    end = view.mapFromScene(QtCore.QPointF(430, 140))
+
+    qtbot.keyPress(view.viewport(), Qt.Key.Key_Shift)
+    qtbot.mousePress(view.viewport(), Qt.MouseButton.LeftButton,
+                     Qt.KeyboardModifier.ShiftModifier, pos=start)
+    qtbot.mouseMove(view.viewport(), end)
+    qtbot.mouseRelease(view.viewport(), Qt.MouseButton.LeftButton,
+                       Qt.KeyboardModifier.ShiftModifier, pos=end)
+    qtbot.keyRelease(view.viewport(), Qt.Key.Key_Shift)
+
+    assert first.isSelected()
+    assert second.isSelected()
+
+
+def test_group_membership_can_change_and_undo(view):
+    first = BeeTextItem('first')
+    second = BeeTextItem('second')
+    group = BeeGroupItem()
+    first.setPos(20, 20)
+    second.setPos(220, 20)
+    first.group_id = group.group_id
+    for item in (first, second, group):
+        view.scene.addItem(item)
+    group.refresh_bounds()
+
+    assert view.scene.change_group_membership([second], group.group_id)
+    assert second.group_id == group.group_id
+    view.undo_stack.undo()
+    assert second.group_id is None
+    view.undo_stack.redo()
+    assert second.group_id == group.group_id
+
+    second.setSelected(True)
+    assert view.scene.remove_selection_from_group()
+    assert second.group_id is None
+
+
+def test_drop_target_highlights_and_accepts_an_item(view):
+    member = BeeTextItem('inside')
+    incoming = BeeTextItem('incoming')
+    group = BeeGroupItem()
+    member.group_id = group.group_id
+    member.setPos(50, 50)
+    incoming.setPos(300, 300)
+    for item in (member, incoming, group):
+        view.scene.addItem(item)
+    group.refresh_bounds()
+    incoming.setPos(group.sceneBoundingRect().center())
+    incoming.setSelected(True)
+
+    view.scene._update_group_drop_target()
+    assert view.scene._group_drop_target is group
+    assert group.drop_highlighted is True
+    view.scene._finish_group_drop(
+        [incoming], Qt.KeyboardModifier.NoModifier)
+    assert incoming.group_id == group.group_id
+    assert group.drop_highlighted is False
+
+
+def test_paste_into_selected_group_assigns_new_copies(view):
+    member = BeeTextItem('member')
+    source = BeeTextItem('source')
+    group = BeeGroupItem()
+    member.group_id = group.group_id
+    member.setPos(20, 20)
+    for item in (member, source, group):
+        view.scene.addItem(item)
+    group.refresh_bounds()
+    view.scene.internal_clipboard = [source]
+    group.setSelected(True)
+
+    view.scene.paste_from_internal_clipboard(
+        group.sceneBoundingRect().center(), view.scene.selected_group_id())
+    copies = [item for item in view.scene.items_by_type('text')
+              if item not in (member, source)]
+    assert len(copies) == 1
+    assert copies[0].group_id == group.group_id
+
+
+def test_group_style_defaults_transparent_and_is_undoable(view):
+    group = BeeGroupItem()
+    view.scene.addItem(group)
+    assert group.title == ''
+    assert group.fill_enabled is False
+
+    before = group.style_state()
+    after = dict(before, title='Research', frame_color='#ff6688',
+                 frame_style='solid', fill_enabled=True)
+    view.undo_stack.push(commands.ChangeGroupStyle(group, before, after))
+    assert group.title == 'Research'
+    assert group.frame_color == '#ff6688'
+    assert group.frame_style == 'solid'
+    assert group.fill_enabled is True
+    view.undo_stack.undo()
+    assert group.style_state() == before
 
 
 def test_drop_shadow_can_be_toggled_off_immediately(view):

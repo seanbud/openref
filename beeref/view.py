@@ -149,6 +149,22 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             control.installEventFilter(self)
         self.draw_toolbar.hide()
         self.init_note_tools()
+        self.group_toolbar = widgets.group_toolbar.GroupToolbar(
+            self.viewport())
+        self.group_toolbar.style_changed.connect(self._style_active_group)
+        self.group_toolbar.dismissed.connect(self._close_group_inspector)
+        self._inspected_group = None
+        self.selection_modifier_badge = QtWidgets.QLabel(self.viewport())
+        self.selection_modifier_badge.setFixedSize(18, 18)
+        self.selection_modifier_badge.setAlignment(
+            Qt.AlignmentFlag.AlignCenter)
+        self.selection_modifier_badge.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.selection_modifier_badge.setStyleSheet(
+            'QLabel { color: #f6f7fb; background: rgba(25, 27, 32, 220); '
+            'border: 1px solid rgba(255, 255, 255, 45); '
+            'border-radius: 9px; font: 600 13px; }')
+        self.selection_modifier_badge.hide()
         self.eraser_trail = widgets.modern_ui.EraserTrailOverlay(
             self.viewport())
         self.eraser_trail.stackUnder(self.draw_toolbar)
@@ -287,6 +303,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 'active_when_items_in_scene', has_items)
         self.recalc_scene_rect()
         self.refresh_note_tools()
+        self._reposition_group_toolbar()
 
     def on_can_redo_changed(self, can_redo):
         self.actiongroup_set_enabled('active_when_can_redo', can_redo)
@@ -299,6 +316,64 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
 
     def on_context_menu(self, point):
         self.context_menu.exec(self.mapToGlobal(point))
+
+    def open_group_inspector(self, group):
+        self._inspected_group = group
+        group.setSelected(True)
+        self.group_toolbar.set_state(group.style_state())
+        self._reposition_group_toolbar(focus=True)
+
+    def _style_active_group(self, state):
+        group = self._inspected_group
+        if group is None or group.scene() is not self.scene:
+            return
+        before = group.style_state()
+        if before != state:
+            self.undo_stack.push(commands.ChangeGroupStyle(
+                group, before, state))
+            self._reposition_group_toolbar()
+
+    def _reposition_group_toolbar(self, focus=False):
+        group = getattr(self, '_inspected_group', None)
+        if group is None or group.scene() is not self.scene:
+            return
+        rect = self.mapFromScene(group.sceneBoundingRect()).boundingRect()
+        if focus or self.group_toolbar.isVisible():
+            self.group_toolbar.show_for(rect, focus=focus)
+
+    def _close_group_inspector(self):
+        self._inspected_group = None
+
+    def _update_selection_modifier_badge(self, modifiers, position=None):
+        """Show whether a marquee will add to or subtract from selection."""
+
+        if self.active_mode == self.DRAW_MODE or self.scene.edit_item:
+            self.selection_modifier_badge.hide()
+            return
+        if not isinstance(modifiers, Qt.KeyboardModifier):
+            self.selection_modifier_badge.hide()
+            return
+        symbol = None
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            symbol = '+'
+        elif modifiers & Qt.KeyboardModifier.AltModifier:
+            symbol = '−'
+        if symbol is None:
+            self.selection_modifier_badge.hide()
+            return
+        if position is None:
+            position = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
+        else:
+            position = (position.toPoint()
+                        if hasattr(position, 'toPoint') else position)
+        x = min(max(0, position.x() + 14),
+                max(0, self.viewport().width() - 18))
+        y = min(max(0, position.y() + 14),
+                max(0, self.viewport().height() - 18))
+        self.selection_modifier_badge.setText(symbol)
+        self.selection_modifier_badge.setGeometry(x, y, 18, 18)
+        self.selection_modifier_badge.show()
+        self.selection_modifier_badge.raise_()
 
     def get_supported_image_formats(self, cls):
         formats = []
@@ -549,11 +624,20 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self.show_feedback('Select two or more items to group', '!',
                                duration=1800)
 
+    def on_action_remove_from_group(self):
+        if self.scene.remove_selection_from_group():
+            self.show_feedback('Removed from group', '□',
+                               'remove_from_group')
+        else:
+            self.show_feedback('Selection is not inside a group', '!',
+                               duration=1600)
+
     def on_action_toggle_shadow(self):
         result = self.scene.toggle_shadows()
         if result is None:
-            self.show_feedback('Select text or a drawing to add depth', '!',
-                               duration=1800)
+            self.show_feedback(
+                'Select text, an image, or a drawing to add depth', '!',
+                duration=1800)
         else:
             self.show_feedback('Drop shadow enabled' if result
                                else 'Drop shadow disabled', '◒',
@@ -606,6 +690,23 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
     def on_action_arrange_square(self):
         self.scene.arrange_square()
         self.show_feedback('Arranged in a grid', '▦', 'arrange_square')
+
+    def _align_selection(self, edge, icon):
+        if self.scene.align_selection(edge):
+            self.show_feedback(f'Aligned {edge} edges', icon,
+                               f'align_{edge}')
+
+    def on_action_align_left(self):
+        self._align_selection('left', '⇤')
+
+    def on_action_align_right(self):
+        self._align_selection('right', '⇥')
+
+    def on_action_align_top(self):
+        self._align_selection('top', '↥')
+
+    def on_action_align_bottom(self):
+        self._align_selection('bottom', '↧')
 
     def on_action_change_opacity(self):
         images = list(filter(
@@ -1375,6 +1476,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self.paste_note()
             return
         self.cancel_active_modes()
+        paste_group_id = self.scene.selected_group_id()
         logger.debug('Pasting from clipboard...')
         clipboard = QtWidgets.QApplication.clipboard()
         pos = self.mapToScene(self.mapFromGlobal(self.cursor().pos()))
@@ -1387,13 +1489,14 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if data and self.scene.internal_clipboard:
             # Checking that internal clipboard exists since the user
             # may have opened a new scene since copying.
-            self.scene.paste_from_internal_clipboard(pos)
+            self.scene.paste_from_internal_clipboard(pos, paste_group_id)
             self.show_feedback('Pasted items', '⎘', 'paste')
             return
 
         img = clipboard.image()
         if not img.isNull():
             item = self.prepare_pasted_image(BeePixmapItem(img))
+            item.group_id = paste_group_id
             self.undo_stack.push(commands.InsertItems(self.scene, [item], pos))
             self.show_feedback('Pasted image', '▣', 'paste')
             return
@@ -1406,7 +1509,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if mime_data is not None and not has_text and not has_html:
             text = ''
         if text or has_html:
-            self.create_note(mime=mime_data)
+            self.create_note(mime=mime_data, group_id=paste_group_id)
             return
 
         msg = 'No image data or text in clipboard or image too big'
@@ -1443,6 +1546,10 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 self._syncing_actions = False
         self.viewport().repaint()
         self.refresh_note_tools()
+        if (self._inspected_group is not None
+                and self._inspected_group not in selected_items):
+            self.group_toolbar.hide()
+            self._inspected_group = None
 
     def on_cursor_changed(self, cursor):
         if self.active_mode is None:
@@ -1658,6 +1765,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self.pan(self.mapFromScene(ref_point) - anchor)
         self.reset_previous_transform()
         self._position_draw_toolbar()
+        self._reposition_group_toolbar()
 
     def _begin_zoom_interaction(self):
         """Enter the lightweight rendering path for an active zoom gesture."""
@@ -1879,6 +1987,8 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        self._update_selection_modifier_badge(
+            event.modifiers(), event.position())
         if self._right_canvas_pending:
             pos = event.position()
             if ((pos - self.event_start).manhattanLength() >= 6
@@ -2057,6 +2167,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self._hud_toast.reposition()
 
     def keyPressEvent(self, event):
+        self._update_selection_modifier_badge(event.modifiers())
         note_action = self.note_key_action(event)
         if note_action:
             if note_action == 'native':
@@ -2131,6 +2242,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         super().keyPressEvent(event)
 
     def keyReleaseEvent(self, event):
+        self._update_selection_modifier_badge(event.modifiers())
         if (self.active_mode == self.DRAW_MODE
                 and self._temporary_eraser_tool is not None
                 and event.key()

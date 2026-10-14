@@ -48,7 +48,7 @@ class _ShadowSubjectItem(QtWidgets.QGraphicsItem):
         rect = QtCore.QRectF(target.bounding_rect_unselected())
         state = (QtCore.QPointF(target.pos()), target.scale(),
                  target.rotation(), QtGui.QTransform(target.transform()),
-                 target.zValue(), rect)
+                 target.zValue(), target.opacity(), rect)
         if not force and state == self._state:
             return
         if self._state is None or rect != self._state[-1]:
@@ -58,6 +58,7 @@ class _ShadowSubjectItem(QtWidgets.QGraphicsItem):
         self.setRotation(target.rotation())
         self.setTransform(target.transform())
         self.setZValue(target.zValue())
+        self.setOpacity(target.opacity())
         self._state = state
         self.update()
 
@@ -155,6 +156,9 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._shadow_suspension_reasons = set()
         self._shadow_geometry_dirty = False
         self._shadow_composites = {}
+        self._rubberband_selection_mode = 'replace'
+        self._rubberband_base_selection = set()
+        self._group_drop_target = None
         self._shadow_resume_timer = QtCore.QTimer(self)
         self._shadow_resume_timer.setSingleShot(True)
         self._shadow_resume_timer.timeout.connect(
@@ -241,7 +245,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         return (not self._clear_ongoing
                 and not self._syncing_shadows
                 and not self._suppress_shadow_sync
-                and getattr(item, 'TYPE', None) in ('text', 'path')
+                and getattr(item, 'TYPE', None) in ('pixmap', 'text', 'path')
                 and getattr(item, 'shadow', {}).get('enabled', False))
 
     def cancel_active_modes(self):
@@ -250,13 +254,17 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         """
         self.cancel_crop_mode()
         self.end_rubberband_mode()
+        self._set_group_drop_target(None)
         self.resume_shadow_rendering('scene-move')
 
     def end_rubberband_mode(self):
+        self.collapse_selected_group_members()
         if self.rubberband_item.scene():
             logger.debug('Ending rubberband selection')
             self.removeItem(self.rubberband_item)
         self.resume_shadow_rendering('rubberband')
+        self._rubberband_selection_mode = 'replace'
+        self._rubberband_base_selection = set()
         self.active_mode = None
 
     def cancel_crop_mode(self):
@@ -280,10 +288,80 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self.undo_stack.push(commands.GroupItems(self, group, members))
         return True
 
+    def selected_group_id(self):
+        groups = [item for item in self.selectedItems(user_only=True)
+                  if getattr(item, 'TYPE', None) == 'group']
+        return groups[0].group_id if len(groups) == 1 else None
+
+    def change_group_membership(self, items, group_id):
+        changes = {
+            item: (getattr(item, 'group_id', None), group_id)
+            for item in items
+            if getattr(item, 'TYPE', None) != 'group'
+            and getattr(item, 'group_id', None) != group_id
+        }
+        if not changes:
+            return False
+        self.undo_stack.push(commands.ChangeGroupMembership(self, changes))
+        return True
+
+    def remove_selection_from_group(self):
+        return self.change_group_membership(
+            [item for item in self.selectedItems(user_only=True)
+             if getattr(item, 'group_id', None)], None)
+
+    def _set_group_drop_target(self, group):
+        if group is self._group_drop_target:
+            return
+        if self._group_drop_target is not None:
+            self._group_drop_target.set_drop_highlighted(False)
+        self._group_drop_target = group
+        if group is not None:
+            group.set_drop_highlighted(True)
+
+    def _update_group_drop_target(self):
+        moving = [item for item in self.selectedItems(user_only=True)
+                  if getattr(item, 'TYPE', None) != 'group']
+        if not moving:
+            self._set_group_drop_target(None)
+            return
+        center = self.itemsBoundingRect(items=moving).center()
+        candidates = [
+            group for group in self.items_by_type('group')
+            if group.contains(group.mapFromScene(center))
+            and any(getattr(item, 'group_id', None) != group.group_id
+                    for item in moving)
+        ]
+        target = max(candidates, key=lambda group: group.zValue(),
+                     default=None)
+        self._set_group_drop_target(target)
+
+    def _finish_group_drop(self, moved_items, modifiers):
+        target = self._group_drop_target
+        self._set_group_drop_target(None)
+        items = [item for item in moved_items
+                 if getattr(item, 'TYPE', None) != 'group']
+        if target is not None:
+            self.change_group_membership(items, target.group_id)
+            return
+        if (isinstance(modifiers, Qt.KeyboardModifier)
+                and modifiers & Qt.KeyboardModifier.ControlModifier):
+            removals = []
+            groups = {group.group_id: group
+                      for group in self.items_by_type('group')}
+            for item in items:
+                group = groups.get(getattr(item, 'group_id', None))
+                if (group is not None
+                        and not group.contains(group.mapFromScene(
+                            item.sceneBoundingRect().center()))):
+                    removals.append(item)
+            self.change_group_membership(removals, None)
+
     def toggle_shadows(self):
         """Toggle the clean default depth treatment on compatible items."""
         items = [item for item in self.selectedItems(user_only=True)
-                 if getattr(item, 'TYPE', None) in ('text', 'path')]
+                 if getattr(item, 'TYPE', None) in
+                 ('pixmap', 'text', 'path')]
         if not items:
             return None
         enabled = not all(item.shadow.get('enabled', False) for item in items)
@@ -301,10 +379,12 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self.sync_shadow_composites()
         return enabled
 
-    def paste_from_internal_clipboard(self, position):
+    def paste_from_internal_clipboard(self, position, group_id=None):
         copies = []
         for item in self.internal_clipboard:
             copy = item.create_copy()
+            if getattr(copy, 'TYPE', None) != 'group':
+                copy.group_id = group_id
             copies.append(copy)
         self.undo_stack.push(commands.InsertItems(self, copies, position))
 
@@ -317,6 +397,41 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self.cancel_active_modes()
         items = self.selectedItems(user_only=True)
         self.send_items_to_back(items)
+
+    def align_selection(self, edge):
+        """Align selected board items to a shared outer edge."""
+
+        self.cancel_active_modes()
+        self.collapse_selected_group_members()
+        items = self.selectedItems(user_only=True)
+        if len(items) < 2:
+            return False
+        rects = {item: item.sceneBoundingRect() for item in items}
+        if edge == 'left':
+            target = min(rect.left() for rect in rects.values())
+            deltas = {item: QtCore.QPointF(target - rect.left(), 0)
+                      for item, rect in rects.items()}
+        elif edge == 'right':
+            target = max(rect.right() for rect in rects.values())
+            deltas = {item: QtCore.QPointF(target - rect.right(), 0)
+                      for item, rect in rects.items()}
+        elif edge == 'top':
+            target = min(rect.top() for rect in rects.values())
+            deltas = {item: QtCore.QPointF(0, target - rect.top())
+                      for item, rect in rects.items()}
+        elif edge == 'bottom':
+            target = max(rect.bottom() for rect in rects.values())
+            deltas = {item: QtCore.QPointF(0, target - rect.bottom())
+                      for item, rect in rects.items()}
+        else:
+            raise ValueError(f'Unknown alignment edge: {edge}')
+        before = {item: QtCore.QPointF(item.pos()) for item in items}
+        after = {item: before[item] + deltas[item] for item in items}
+        if before == after:
+            return False
+        self.undo_stack.push(commands.SetItemPositions(
+            self, before, after, f'Align {edge} edges'))
+        return True
 
     def bring_items_to_front(self, items):
         """Promote an ordered group, with one deterministic undo step."""
@@ -606,6 +721,20 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         path.addRect(self.itemsBoundingRect())
         # This is faster than looping through all items and calling setSelected
         self.setSelectionArea(path)
+        self.collapse_selected_group_members()
+
+    def collapse_selected_group_members(self):
+        """Let a selected frame represent its members exactly once."""
+
+        selected = self.selectedItems(user_only=True)
+        selected_group_ids = {
+            item.group_id for item in selected
+            if getattr(item, 'TYPE', None) == 'group'}
+        for item in selected:
+            if (getattr(item, 'TYPE', None) != 'group'
+                    and getattr(item, 'group_id', None)
+                    in selected_group_ids):
+                item.setSelected(False)
 
     def deselect_all_items(self):
         self.cancel_active_modes()
@@ -642,6 +771,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
 
         if event.button() == Qt.MouseButton.LeftButton:
             modifiers = event.modifiers()
+            valid_modifiers = isinstance(modifiers, Qt.KeyboardModifier)
             if (isinstance(modifiers, Qt.KeyboardModifier)
                     and modifiers
                     & Qt.KeyboardModifier.ShiftModifier):
@@ -659,6 +789,17 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                     if hasattr(item_at_pos, 'bring_to_front'):
                         self.bring_items_to_front(
                             self.selectedItems(user_only=True))
+                    event.accept()
+                    return
+            if (isinstance(modifiers, Qt.KeyboardModifier)
+                    and modifiers & Qt.KeyboardModifier.AltModifier):
+                item_at_pos = next((
+                    item for item in self.items(event.scenePos())
+                    if item is not self.multi_select_item
+                    and hasattr(item, 'save_id')
+                ), None)
+                if item_at_pos is not None:
+                    item_at_pos.setSelected(False)
                     event.accept()
                     return
             self.event_start = event.scenePos()
@@ -681,6 +822,21 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 self.active_mode = self.MOVE_MODE
             elif self.items():
                 self.active_mode = self.RUBBERBAND_MODE
+                self._rubberband_base_selection = set(
+                    self.selectedItems(user_only=True))
+                if (valid_modifiers
+                        and modifiers & Qt.KeyboardModifier.ShiftModifier):
+                    self._rubberband_selection_mode = 'add'
+                elif (valid_modifiers
+                        and modifiers & Qt.KeyboardModifier.AltModifier):
+                    self._rubberband_selection_mode = 'subtract'
+                else:
+                    self._rubberband_selection_mode = 'replace'
+                # QGraphicsScene clears the selection on an empty press.
+                # Preserve it for additive and subtractive marquee gestures.
+                if self._rubberband_selection_mode != 'replace':
+                    event.accept()
+                    return
 
         super().mousePressEvent(event)
         if (event.button() == Qt.MouseButton.LeftButton
@@ -700,6 +856,13 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         if item:
             if getattr(item, 'TYPE', None) == 'path':
                 self.views()[0].enter_draw_mode(item)
+                event.accept()
+                return
+            if getattr(item, 'TYPE', None) == 'group':
+                if not item.isSelected():
+                    self.deselect_all_items()
+                    item.setSelected(True)
+                self.views()[0].open_group_inspector(item)
                 event.accept()
                 return
             if not item.isSelected():
@@ -722,13 +885,33 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 self.addItem(self.rubberband_item)
                 self.rubberband_item.bring_to_front()
             self.rubberband_item.fit(self.event_start, event.scenePos())
-            self.setSelectionArea(self.rubberband_item.shape())
+            hits = {
+                item for item in self.items(self.rubberband_item.shape())
+                if item is not self.rubberband_item
+                and item is not self.multi_select_item
+                and hasattr(item, 'save_id')
+            }
+            if self._rubberband_selection_mode == 'add':
+                desired = self._rubberband_base_selection | hits
+            elif self._rubberband_selection_mode == 'subtract':
+                desired = self._rubberband_base_selection - hits
+            else:
+                desired = hits
+            selected = set(self.selectedItems(user_only=True))
+            for item in selected - desired:
+                item.setSelected(False)
+            for item in desired - selected:
+                item.setSelected(True)
             self.views()[0].reset_previous_transform()
         elif self.active_mode == self.MOVE_MODE:
             self.suspend_shadow_rendering('scene-move')
         super().mouseMoveEvent(event)
+        if self.active_mode == self.MOVE_MODE:
+            self._update_group_drop_target()
 
     def mouseReleaseEvent(self, event):
+        completed_mode = self.active_mode
+        moved_items = list(self.selectedItems(user_only=True))
         if self.active_mode == self.RUBBERBAND_MODE:
             self.end_rubberband_mode()
         if (self.active_mode == self.MOVE_MODE
@@ -738,12 +921,18 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             delta = event.scenePos() - self.event_start
             if not delta.isNull():
                 self.undo_stack.push(
-                    commands.MoveItemsBy(self.selectedItems(),
+                    commands.MoveItemsBy(self.selectedItems(user_only=True),
                                          delta,
                                          ignore_first_redo=True))
         self.resume_shadow_rendering('scene-move', deferred=True)
         self.active_mode = None
         super().mouseReleaseEvent(event)
+        if completed_mode == self.MOVE_MODE:
+            self._finish_group_drop(moved_items, event.modifiers())
+        else:
+            self._set_group_drop_target(None)
+        self.sync_groups()
+        self.schedule_used_space_refresh()
 
     def selectedItems(self, user_only=False):
         """If ``user_only`` is set to ``True``, only return items added
@@ -840,9 +1029,11 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 and self.multi_select_item.active_mode is None):
             self.multi_select_item.fit_selection_area(
                 self.itemsBoundingRect(selection_only=True))
-        if self.active_mode == self.RUBBERBAND_MODE:
-            # The rubberband itself emits scene changes at pointer frequency.
-            # It does not alter group membership or persistent canvas bounds.
+        if self.active_mode in (self.RUBBERBAND_MODE, self.MOVE_MODE):
+            # Transient rubberband geometry does not alter groups or canvas
+            # bounds. During a move, refitting a selected group while Qt is
+            # still moving its contents creates competing position updates;
+            # mouseReleaseEvent performs one authoritative final refit.
             return
         self.sync_groups()
         # ``changed`` fires for every paint invalidation. In particular, a
@@ -877,7 +1068,8 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         try:
             members_by_id = {}
             for item in self.items_for_save():
-                if getattr(item, 'TYPE', None) not in ('text', 'path'):
+                if getattr(item, 'TYPE', None) not in (
+                        'pixmap', 'text', 'path'):
                     continue
                 shadow = getattr(item, 'shadow', {})
                 if not shadow.get('enabled'):
