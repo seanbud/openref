@@ -44,3 +44,12 @@ eraser behavior, shadows at rest, and screen-pinned controls.
 Future feature work will be evaluated against real workflows after 0.7. The
 previous planned appearance-container and automatic symbol-recognition
 milestones are intentionally retired.
+
+## 0.8 — Structured boards without modal overhead
+
+The 0.8 line makes selection and groups practical for larger working boards.
+Marquee selection can add or subtract, common edges align from the keyboard,
+and group membership becomes a direct spatial action. Group styling remains
+contextual and optional: frames start transparent and untitled, then expose a
+small inspector only when deliberately opened. Link-aware notes and image
+shadows extend the same direct-manipulation model without adding permanent UI.

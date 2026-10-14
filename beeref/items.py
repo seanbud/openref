@@ -884,7 +884,8 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
     DEFAULT_SHADOW = DEFAULT_SHADOW
 
     def __init__(self, text=None, html=None, font_size=None,
-                 text_width=None, appearance=None, shadow=None, **kwargs):
+                 text_width=None, appearance=None, shadow=None,
+                 link_url=None, **kwargs):
         # Keep old construction semantics for code and old files that only
         # supplied a text field.  New-note callers explicitly provide a font
         # size, width and an empty text string.
@@ -902,6 +903,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         # to the literal characters; any other editing key clears the grace
         # state and behaves normally.
         self._auto_arrow_backspace_position = None
+        self._link_url = None
         self._font_size = int(font_size) if font_size is not None else None
         self._text_width = float(text_width) if text_width is not None else -1
         self.appearance = dict(self.DEFAULT_APPEARANCE)
@@ -919,6 +921,8 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         else:
             initial_text = 'Text' if text is None and legacy else text
             self.setPlainText(initial_text or '')
+        if _safe_web_url(link_url) == self.standalone_link_url():
+            self._activate_standalone_link(link_url)
         logger.debug(f'Initialized {self}')
 
     @classmethod
@@ -1009,7 +1013,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         self.update()
 
     def text_state(self):
-        return {
+        state = {
             'text': self.toPlainText(),
             'html': self.document().toHtml(),
             'font_size': self._font_size,
@@ -1017,6 +1021,9 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             'appearance': copy.deepcopy(self.appearance),
             'shadow': copy.deepcopy(self.shadow),
         }
+        if self.active_link_url():
+            state['link_url'] = self.active_link_url()
+        return state
 
     def set_text_state(self, state):
         """Apply a complete rich-note state without adding history."""
@@ -1024,6 +1031,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         self._applying_state = True
         self.prepareGeometryChange()
         try:
+            self._link_url = None
             self._font_size = state.get('font_size')
             if self._font_size is not None:
                 self._font_size = int(self._font_size)
@@ -1040,6 +1048,9 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
                 _set_note_html(self.document(), state['html'])
             else:
                 self.setPlainText(state.get('text', ''))
+            link_url = state.get('link_url')
+            if _safe_web_url(link_url) == self.standalone_link_url():
+                self._activate_standalone_link(link_url)
         finally:
             self._applying_state = False
         self.update()
@@ -1053,9 +1064,31 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
     def standalone_link_url(self):
         return _safe_web_url(self.toPlainText())
 
+    def active_link_url(self):
+        current = self.standalone_link_url()
+        return current if current and current == self._link_url else None
+
+    def _activate_standalone_link(self, url=None):
+        url = _safe_web_url(url or self.standalone_link_url())
+        if url is None or url != self.standalone_link_url():
+            return False
+        cursor = QtGui.QTextCursor(self.document())
+        cursor.select(QtGui.QTextCursor.SelectionType.Document)
+        link_format = QtGui.QTextCharFormat()
+        link_format.setAnchor(True)
+        link_format.setAnchorHref(url)
+        link_format.setForeground(QtGui.QColor('#4d9cff'))
+        link_format.setFontUnderline(True)
+        cursor.mergeCharFormat(link_format)
+        cursor.clearSelection()
+        cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
+        self.setTextCursor(cursor)
+        self._link_url = url
+        return True
+
     def boundingRect(self):
         rect = QtWidgets.QGraphicsTextItem.boundingRect(self)
-        if self.standalone_link_url():
+        if self.active_link_url():
             rect.adjust(0, 0, 18, 0)
         return rect
 
@@ -1076,7 +1109,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             max(0, self.appearance['radius'] - inset))
         option.state = QtWidgets.QStyle.StateFlag.State_Enabled
         super().paint(painter, option, widget)
-        if self.standalone_link_url():
+        if self.active_link_url():
             # A font-independent chain affordance without changing the URL.
             base = QtWidgets.QGraphicsTextItem.boundingRect(self)
             painter.save()
@@ -1093,7 +1126,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         self.paint_selectable(painter, option, widget)
 
     def mousePressEvent(self, event):
-        url = self.standalone_link_url()
+        url = self.active_link_url()
         if (url and event.modifiers()
                 & (Qt.KeyboardModifier.ControlModifier
                    | Qt.KeyboardModifier.MetaModifier)):
@@ -1332,17 +1365,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         if (event.key() in (Qt.Key.Key_Enter, Qt.Key.Key_Return)
                 and modifiers == Qt.KeyboardModifier.NoModifier
                 and self.standalone_link_url()):
-            cursor = QtGui.QTextCursor(self.document())
-            cursor.select(QtGui.QTextCursor.SelectionType.Document)
-            link_format = QtGui.QTextCharFormat()
-            link_format.setAnchor(True)
-            link_format.setAnchorHref(self.standalone_link_url())
-            link_format.setForeground(QtGui.QColor('#4d9cff'))
-            link_format.setFontUnderline(True)
-            cursor.mergeCharFormat(link_format)
-            cursor.clearSelection()
-            cursor.movePosition(QtGui.QTextCursor.MoveOperation.End)
-            self.setTextCursor(cursor)
+            self._activate_standalone_link()
         # Enter is a normal rich-text newline. Escape is a convenient commit,
         # not a cancellation, so an editing session maps to board undo once.
         if (event.key() == Qt.Key.Key_Escape
@@ -1787,7 +1810,8 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
     DEFAULT_LABEL_COLOR = '#c7cad5'
 
     def __init__(self, group_id=None, title='', frame_color=None,
-                 label_color=None, padding=20.0, **kwargs):
+                 label_color=None, padding=20.0, frame_style='dash',
+                 fill_enabled=False, **kwargs):
         super().__init__()
         self.save_id = None
         self.group_id = group_id or uuid.uuid4().hex
@@ -1796,6 +1820,10 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         self.frame_color = frame_color or self.DEFAULT_FRAME_COLOR
         self.label_color = label_color or self.DEFAULT_LABEL_COLOR
         self.padding = max(0.0, float(padding))
+        self.frame_style = (frame_style if frame_style in ('dash', 'solid')
+                            else 'dash')
+        self.fill_enabled = bool(fill_enabled)
+        self.drop_highlighted = False
         self._rect = QtCore.QRectF(0, 0, 1, 1)
         self._refreshing_bounds = False
         self.init_selectable()
@@ -1809,7 +1837,9 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         return cls(group_id=data.get('group_id'), title=data.get('title'),
                    frame_color=data.get('frame_color'),
                    label_color=data.get('label_color'),
-                   padding=data.get('padding', 20.0))
+                   padding=data.get('padding', 20.0),
+                   frame_style=data.get('frame_style', 'dash'),
+                   fill_enabled=data.get('fill_enabled', False))
 
     def __str__(self):
         return f'Group "{self.title}"' if self.title else 'Group'
@@ -1878,11 +1908,18 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
 
     def paint(self, painter, option, widget):
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
-        color = QtGui.QColor(self.frame_color)
-        pen = QtGui.QPen(color, 1.25)
-        pen.setStyle(Qt.PenStyle.DashLine)
+        color = (QtGui.QColor('#55aaff') if self.drop_highlighted
+                 else QtGui.QColor(self.frame_color))
+        pen = QtGui.QPen(color, 2.0 if self.drop_highlighted else 1.25)
+        pen.setStyle(Qt.PenStyle.DashLine if self.frame_style == 'dash'
+                     else Qt.PenStyle.SolidLine)
         painter.setPen(pen)
-        painter.setBrush(Qt.BrushStyle.NoBrush)
+        if self.fill_enabled or self.drop_highlighted:
+            fill = QtGui.QColor(color)
+            fill.setAlpha(42 if self.drop_highlighted else 24)
+            painter.setBrush(fill)
+        else:
+            painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(self._rect.adjusted(.625, .625, -.625, -.625),
                                 8, 8)
         if self.title:
@@ -1890,15 +1927,47 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
             painter.drawText(QtCore.QPointF(2, -8), self.title)
         self.paint_selectable(painter, option, widget)
 
+    def style_state(self):
+        return {'title': self.title, 'frame_color': self.frame_color,
+                'label_color': self.label_color,
+                'frame_style': self.frame_style,
+                'fill_enabled': self.fill_enabled}
+
+    def apply_style(self, state):
+        state = dict(state)
+        self.prepareGeometryChange()
+        self.title = str(state.get('title', self.title) or '')
+        color = QtGui.QColor(state.get('frame_color', self.frame_color))
+        if color.isValid():
+            self.frame_color = color.name()
+        label = QtGui.QColor(state.get('label_color', self.label_color))
+        if label.isValid():
+            self.label_color = label.name()
+        style = state.get('frame_style', self.frame_style)
+        self.frame_style = style if style in ('dash', 'solid') else 'dash'
+        self.fill_enabled = bool(state.get(
+            'fill_enabled', self.fill_enabled))
+        self.update()
+
+    def set_drop_highlighted(self, highlighted):
+        highlighted = bool(highlighted)
+        if highlighted != self.drop_highlighted:
+            self.drop_highlighted = highlighted
+            self.update()
+
     def get_extra_save_data(self):
         return {'group_id': self.group_id, 'title': self.title,
                 'frame_color': self.frame_color,
-                'label_color': self.label_color, 'padding': self.padding}
+                'label_color': self.label_color, 'padding': self.padding,
+                'frame_style': self.frame_style,
+                'fill_enabled': self.fill_enabled}
 
     def create_copy(self):
         item = BeeGroupItem(title=self.title, frame_color=self.frame_color,
                             label_color=self.label_color,
-                            padding=self.padding)
+                            padding=self.padding,
+                            frame_style=self.frame_style,
+                            fill_enabled=self.fill_enabled)
         item.setPos(self.pos())
         item.setZValue(self.zValue())
         return item

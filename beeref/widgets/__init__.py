@@ -29,6 +29,7 @@ from beeref.widgets import (  # noqa: F401
     welcome_overlay,
     color_gamut,
     drawing_toolbar,
+    group_toolbar,
     modern_ui,
 )
 

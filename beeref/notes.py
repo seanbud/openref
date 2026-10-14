@@ -113,12 +113,14 @@ class NoteEditingMixin:
     def on_note_editing_changed(self, item, editing):
         self.refresh_note_tools()
 
-    def create_note(self, position=None, text='', mime=None, mode='auto'):
+    def create_note(self, position=None, text='', mime=None, mode='auto',
+                    group_id=None):
         self.cancel_active_modes()
         # Restore the original OpenRef note geometry: a compact ``Text``
         # label using Qt's default width, padding and font. Editing still
         # begins immediately, with that label selected for replacement.
         item = BeeTextItem(text if text else None)
+        item.group_id = group_id
         item.setScale(1 / self.get_scale())
         if position is None:
             local = self.viewport().mapFromGlobal(QtGui.QCursor.pos())

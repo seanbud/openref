@@ -1,3 +1,31 @@
+0.8.0 beta 1
+============
+
+Added
+-----
+
+* Shift-drag adds a marquee region to the current selection; Option/Alt-drag
+  subtracts one. A compact cursor badge makes the active mode visible.
+* Ctrl/Cmd plus an arrow aligns a multi-selection to its left, right, top, or
+  bottom outer edge as one undoable operation.
+* Images now support the same clean, shared drop shadows as notes and drawings.
+* Ctrl/Cmd + T opens the live text-color picker for selected note text.
+* Standalone HTTP and HTTPS links become blue, underlined link notes after
+  Enter; Ctrl/Cmd-click opens their validated address.
+* Items can be dropped into highlighted groups, removed by Control-dragging
+  outside or using the context menu, and pasted directly into a selected group.
+* Double-clicking a group opens a compact inspector for its optional title,
+  frame color and style, and matching background tint. Groups remain untitled
+  and transparent by default.
+
+Fixed
+-----
+
+* Mixed text, image, and drawing groups now move through one authoritative
+  transform, preventing members from jumping or moving twice after grouping.
+* Group interiors are usable selection and drag targets while their contents
+  remain directly clickable above the frame.
+
 0.7.0 beta 2
 ============
 

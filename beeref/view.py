@@ -149,6 +149,11 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             control.installEventFilter(self)
         self.draw_toolbar.hide()
         self.init_note_tools()
+        self.group_toolbar = widgets.group_toolbar.GroupToolbar(
+            self.viewport())
+        self.group_toolbar.style_changed.connect(self._style_active_group)
+        self.group_toolbar.dismissed.connect(self._close_group_inspector)
+        self._inspected_group = None
         self.selection_modifier_badge = QtWidgets.QLabel(self.viewport())
         self.selection_modifier_badge.setFixedSize(18, 18)
         self.selection_modifier_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -297,6 +302,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 'active_when_items_in_scene', has_items)
         self.recalc_scene_rect()
         self.refresh_note_tools()
+        self._reposition_group_toolbar()
 
     def on_can_redo_changed(self, can_redo):
         self.actiongroup_set_enabled('active_when_can_redo', can_redo)
@@ -309,6 +315,33 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
 
     def on_context_menu(self, point):
         self.context_menu.exec(self.mapToGlobal(point))
+
+    def open_group_inspector(self, group):
+        self._inspected_group = group
+        group.setSelected(True)
+        self.group_toolbar.set_state(group.style_state())
+        self._reposition_group_toolbar(focus=True)
+
+    def _style_active_group(self, state):
+        group = self._inspected_group
+        if group is None or group.scene() is not self.scene:
+            return
+        before = group.style_state()
+        if before != state:
+            self.undo_stack.push(commands.ChangeGroupStyle(
+                group, before, state))
+            self._reposition_group_toolbar()
+
+    def _reposition_group_toolbar(self, focus=False):
+        group = getattr(self, '_inspected_group', None)
+        if group is None or group.scene() is not self.scene:
+            return
+        rect = self.mapFromScene(group.sceneBoundingRect()).boundingRect()
+        if focus or self.group_toolbar.isVisible():
+            self.group_toolbar.show_for(rect, focus=focus)
+
+    def _close_group_inspector(self):
+        self._inspected_group = None
 
     def _update_selection_modifier_badge(self, modifiers, position=None):
         """Show whether a marquee will add to or subtract from selection."""
@@ -589,10 +622,19 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self.show_feedback('Select two or more items to group', '!',
                                duration=1800)
 
+    def on_action_remove_from_group(self):
+        if self.scene.remove_selection_from_group():
+            self.show_feedback('Removed from group', '□',
+                               'remove_from_group')
+        else:
+            self.show_feedback('Selection is not inside a group', '!',
+                               duration=1600)
+
     def on_action_toggle_shadow(self):
         result = self.scene.toggle_shadows()
         if result is None:
-            self.show_feedback('Select text or a drawing to add depth', '!',
+            self.show_feedback(
+                'Select text, an image, or a drawing to add depth', '!',
                                duration=1800)
         else:
             self.show_feedback('Drop shadow enabled' if result
@@ -1432,6 +1474,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self.paste_note()
             return
         self.cancel_active_modes()
+        paste_group_id = self.scene.selected_group_id()
         logger.debug('Pasting from clipboard...')
         clipboard = QtWidgets.QApplication.clipboard()
         pos = self.mapToScene(self.mapFromGlobal(self.cursor().pos()))
@@ -1444,13 +1487,14 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if data and self.scene.internal_clipboard:
             # Checking that internal clipboard exists since the user
             # may have opened a new scene since copying.
-            self.scene.paste_from_internal_clipboard(pos)
+            self.scene.paste_from_internal_clipboard(pos, paste_group_id)
             self.show_feedback('Pasted items', '⎘', 'paste')
             return
 
         img = clipboard.image()
         if not img.isNull():
             item = self.prepare_pasted_image(BeePixmapItem(img))
+            item.group_id = paste_group_id
             self.undo_stack.push(commands.InsertItems(self.scene, [item], pos))
             self.show_feedback('Pasted image', '▣', 'paste')
             return
@@ -1463,7 +1507,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if mime_data is not None and not has_text and not has_html:
             text = ''
         if text or has_html:
-            self.create_note(mime=mime_data)
+            self.create_note(mime=mime_data, group_id=paste_group_id)
             return
 
         msg = 'No image data or text in clipboard or image too big'
@@ -1500,6 +1544,10 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 self._syncing_actions = False
         self.viewport().repaint()
         self.refresh_note_tools()
+        if (self._inspected_group is not None
+                and self._inspected_group not in selected_items):
+            self.group_toolbar.hide()
+            self._inspected_group = None
 
     def on_cursor_changed(self, cursor):
         if self.active_mode is None:
@@ -1715,6 +1763,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self.pan(self.mapFromScene(ref_point) - anchor)
         self.reset_previous_transform()
         self._position_draw_toolbar()
+        self._reposition_group_toolbar()
 
     def _begin_zoom_interaction(self):
         """Enter the lightweight rendering path for an active zoom gesture."""

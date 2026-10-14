@@ -232,6 +232,9 @@ actions = ActionList([
         callback='on_action_group_selection',
         group='active_when_selection',
     ),
+    Action(id='remove_from_group', text='Remove from Group',
+           callback='on_action_remove_from_group',
+           group='active_when_selection'),
     Action(
         id='toggle_shadow',
         text='Toggle Drop &Shadow',

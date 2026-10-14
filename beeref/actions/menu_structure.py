@@ -114,6 +114,7 @@ menu_structure = [
         'menu': '&Arrange',
         'items': [
             'group_selection',
+            'remove_from_group',
             'raise_to_top',
             'lower_to_bottom',
             'move_forward',
