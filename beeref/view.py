@@ -156,7 +156,8 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self._inspected_group = None
         self.selection_modifier_badge = QtWidgets.QLabel(self.viewport())
         self.selection_modifier_badge.setFixedSize(18, 18)
-        self.selection_modifier_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.selection_modifier_badge.setAlignment(
+            Qt.AlignmentFlag.AlignCenter)
         self.selection_modifier_badge.setAttribute(
             Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         self.selection_modifier_badge.setStyleSheet(
@@ -363,7 +364,8 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if position is None:
             position = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
         else:
-            position = position.toPoint() if hasattr(position, 'toPoint') else position
+            position = (position.toPoint()
+                        if hasattr(position, 'toPoint') else position)
         x = min(max(0, position.x() + 14),
                 max(0, self.viewport().width() - 18))
         y = min(max(0, position.y() + 14),
@@ -635,7 +637,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if result is None:
             self.show_feedback(
                 'Select text, an image, or a drawing to add depth', '!',
-                               duration=1800)
+                duration=1800)
         else:
             self.show_feedback('Drop shadow enabled' if result
                                else 'Drop shadow disabled', '◒',
