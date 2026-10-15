@@ -122,6 +122,12 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self._zoom_settle_timer.setInterval(140)
         self._zoom_settle_timer.timeout.connect(self._finish_zoom_interaction)
         self._zoom_interaction_active = False
+        self._active_color_dialog = None
+        self._color_sample_timer = QtCore.QTimer(self)
+        self._color_sample_timer.setInterval(35)
+        self._color_sample_timer.timeout.connect(
+            self._sample_active_color_picker)
+        self._color_sample_timer.start()
         self.window_position_locked = False
         self._recalculating_scene_rect = False
         self._managed_scene_rect_initialized = False
@@ -912,10 +918,29 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                                shortcut='[  ]', duration=900)
 
     def on_action_set_brush_color(self):
+        paths = [item for item in self.scene.selectedItems(user_only=True)
+                 if getattr(item, 'TYPE', None) == 'path']
+        before = {item: copy.deepcopy(item.strokes) for item in paths}
         current = QtGui.QColor(*self.draw_brush_color)
+        if paths and paths[0].strokes:
+            current = QtGui.QColor(*paths[0].strokes[0].get(
+                'color', self.draw_brush_color))
         dialog = widgets.modern_ui.ColorPickerDialog(current, self)
-        dialog.color_changed.connect(self.draw_toolbar.set_color)
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+        self._active_color_dialog = dialog
+
+        def preview(color):
+            self.draw_toolbar.set_color(color)
+            rgba = [color.red(), color.green(), color.blue(), color.alpha()]
+            for item, strokes in before.items():
+                recolored = copy.deepcopy(strokes)
+                for stroke in recolored:
+                    stroke['color'] = list(rgba)
+                item.replace_strokes(recolored)
+
+        dialog.color_changed.connect(preview)
+        result = dialog.exec()
+        self._active_color_dialog = None
+        if result == QtWidgets.QDialog.DialogCode.Accepted:
             color = dialog.selectedColor()
             self.draw_brush_color = [
                 color.red(), color.green(), color.blue(), color.alpha()]
@@ -923,11 +948,52 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 'Drawing/default_color',
                 color.name(QtGui.QColor.NameFormat.HexArgb))
             self.draw_toolbar.set_color(color)
+            if paths:
+                self.undo_stack.beginMacro('Recolor drawings')
+                try:
+                    for item in paths:
+                        after = copy.deepcopy(item.strokes)
+                        if after != before[item]:
+                            self.undo_stack.push(commands.ChangeDrawing(
+                                item, after, before[item],
+                                ignore_first_redo=True))
+                finally:
+                    self.undo_stack.endMacro()
             self.show_feedback(
                 f'Stroke color {color.name().upper()}', '●',
                 shortcut='Ctrl+T')
         else:
+            for item, strokes in before.items():
+                item.replace_strokes(strokes)
             self.draw_toolbar.set_color(current)
+
+    def _active_color_picker(self):
+        dialog = self._active_color_dialog
+        if dialog is not None and dialog.isVisible():
+            return dialog
+        for picker in (self.note_toolbar.color_popover,
+                       self.group_toolbar.color_popover):
+            if picker.isVisible():
+                return picker
+        return None
+
+    def _sample_active_color_picker(self):
+        """Live-sample the canvas beneath the pointer while Alt is held."""
+
+        picker = self._active_color_picker()
+        if picker is None:
+            return False
+        if not (QtWidgets.QApplication.keyboardModifiers()
+                & Qt.KeyboardModifier.AltModifier):
+            return False
+        viewport_pos = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
+        if not self.viewport().rect().contains(viewport_pos):
+            return False
+        color = self.scene.sample_color_at(self.mapToScene(viewport_pos))
+        if color is None:
+            return False
+        picker.set_color(color)
+        return True
 
     def on_action_set_brush_size(self):
         size, ok = QtWidgets.QInputDialog.getInt(
@@ -1914,10 +1980,11 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if (event.button() == Qt.MouseButton.LeftButton
                 and isinstance(modifiers, Qt.KeyboardModifier)
                 and modifiers & Qt.KeyboardModifier.AltModifier
-                and self.note_toolbar.color_popover.isVisible()):
+                and self._active_color_picker() is not None):
+            picker = self._active_color_picker()
             color = self.scene.sample_color_at(self.mapToScene(event.pos()))
-            if color is not None:
-                self.note_toolbar.color_popover.set_color(color)
+            if color is not None and picker is not None:
+                picker.set_color(color)
             event.accept()
             return
         if (event.button() == Qt.MouseButton.RightButton

@@ -49,6 +49,46 @@ def test_color_choice_persists_as_next_session_default(view, settings):
     reopened.deleteLater()
 
 
+def test_alt_sampling_targets_whichever_color_picker_is_open(view):
+    sampled = QtGui.QColor('#2f9d72')
+    view.group_toolbar.color_popover.show()
+    with patch.object(
+            QtWidgets.QApplication, 'keyboardModifiers',
+            return_value=Qt.KeyboardModifier.AltModifier), patch.object(
+                view.viewport(), 'mapFromGlobal',
+                return_value=view.viewport().rect().center()), patch.object(
+                    view.scene, 'sample_color_at',
+                    return_value=sampled), patch.object(
+                        view.group_toolbar.color_popover,
+                        'set_color') as set_color:
+        assert view._sample_active_color_picker()
+    set_color.assert_called_once_with(sampled)
+
+
+def test_brush_color_picker_recolors_selected_vectors_as_one_undo(view):
+    item = BeePathItem([{
+        'tool': 'line', 'style': 'solid',
+        'color': [255, 255, 255, 255], 'base_size': 4,
+        'points': [{'x': 0, 'y': 0}, {'x': 80, 'y': 0}],
+    }])
+    item._update_bounding_rect()
+    view.scene.addItem(item)
+    item.setSelected(True)
+    chosen = QtGui.QColor('#7ac5e2')
+
+    with patch('beeref.widgets.modern_ui.ColorPickerDialog') as dialog:
+        picker = dialog.return_value
+        picker.exec.return_value = QtWidgets.QDialog.DialogCode.Accepted
+        picker.selectedColor.return_value = chosen
+        picker.color_changed.connect.side_effect = (
+            lambda callback: callback(chosen))
+        view.on_action_set_brush_color()
+
+    assert item.strokes[0]['color'] == [122, 197, 226, 255]
+    view.undo_stack.undo()
+    assert item.strokes[0]['color'] == [255, 255, 255, 255]
+
+
 def test_new_text_shortcut_exits_draw_mode(qtbot, view):
     assert actions.actions['insert_text'].get_shortcuts() == ['Ctrl+N']
     assert actions.actions['new_scene'].get_shortcuts() == ['Ctrl+Shift+N']
