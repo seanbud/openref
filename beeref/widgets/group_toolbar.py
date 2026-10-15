@@ -10,6 +10,16 @@ from beeref.widgets.note_toolbar import _NoteColorPopover
 Qt = QtCore.Qt
 
 
+class GroupTitleEdit(QtWidgets.QLineEdit):
+    """Keep canvas shortcuts from stealing keystrokes from the title."""
+
+    def event(self, event):
+        if event.type() == QtCore.QEvent.Type.ShortcutOverride:
+            event.accept()
+            return True
+        return super().event(event)
+
+
 class GroupToolbar(QtWidgets.QFrame):
     """Screen-space inspector shown when a group is double-clicked."""
 
@@ -27,7 +37,7 @@ class GroupToolbar(QtWidgets.QFrame):
         layout.setContentsMargins(5, 4, 5, 4)
         layout.setSpacing(3)
 
-        self.title_edit = QtWidgets.QLineEdit(self)
+        self.title_edit = GroupTitleEdit(self)
         self.title_edit.setObjectName('groupTitleEdit')
         self.title_edit.setPlaceholderText('Group title')
         self.title_edit.setFixedWidth(126)

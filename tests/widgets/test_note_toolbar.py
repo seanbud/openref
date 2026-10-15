@@ -58,3 +58,22 @@ def test_note_toolbar_controls_do_not_take_focus(qtbot):
                for button in toolbar.buttons.values())
     assert (toolbar.text_color_button.focusPolicy()
             == QtCore.Qt.FocusPolicy.NoFocus)
+
+
+def test_repeated_color_shortcut_can_cycle_older_recent_colors(
+        qtbot, monkeypatch):
+    viewport = QtWidgets.QWidget()
+    viewport.resize(500, 300)
+    qtbot.addWidget(viewport)
+    toolbar = NoteToolbar(viewport)
+    qtbot.addWidget(toolbar)
+    popover = toolbar.color_popover
+    monkeypatch.setattr(
+        popover, '_load_colors',
+        lambda key: ['#FFFF0000', '#FF00FF00'])
+    popover.set_color('#0000ff', emit=False)
+    popover.show_for(toolbar)
+
+    with qtbot.waitSignal(popover.color_changed) as signal:
+        assert popover.cycle_previous()
+    assert signal.args[0].name() == '#ff0000'

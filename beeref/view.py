@@ -69,6 +69,12 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             QtGui.QBrush(QtGui.QColor(*constants.COLORS['Scene:Canvas'])))
         self.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         self.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        # Selection handles extend beyond Qt's native item paint bounds.
+        # Updating the union of changed bounds avoids stale handle pixels
+        # without repainting the full canvas every frame.
+        self.setViewportUpdateMode(
+            QtWidgets.QGraphicsView.ViewportUpdateMode
+            .BoundingRectViewportUpdate)
 
         self.undo_stack = QtGui.QUndoStack(self)
         self.undo_stack.setUndoLimit(100)
@@ -116,6 +122,12 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self._zoom_settle_timer.setInterval(140)
         self._zoom_settle_timer.timeout.connect(self._finish_zoom_interaction)
         self._zoom_interaction_active = False
+        self._active_color_dialog = None
+        self._color_sample_timer = QtCore.QTimer(self)
+        self._color_sample_timer.setInterval(35)
+        self._color_sample_timer.timeout.connect(
+            self._sample_active_color_picker)
+        self._color_sample_timer.start()
         self.window_position_locked = False
         self._recalculating_scene_rect = False
         self._managed_scene_rect_initialized = False
@@ -612,10 +624,13 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
 
     def on_action_cut(self):
         logger.debug('Cutting items...')
+        items = self.scene.selection_with_group_contents()
         self.on_action_copy()
+        if not items:
+            return
         self.undo_stack.push(
             commands.DeleteItems(
-                self.scene, self.scene.selectedItems(user_only=True)))
+                self.scene, items))
 
     def on_action_group_selection(self):
         if self.scene.group_selection():
@@ -903,10 +918,29 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                                shortcut='[  ]', duration=900)
 
     def on_action_set_brush_color(self):
+        paths = [item for item in self.scene.selectedItems(user_only=True)
+                 if getattr(item, 'TYPE', None) == 'path']
+        before = {item: copy.deepcopy(item.strokes) for item in paths}
         current = QtGui.QColor(*self.draw_brush_color)
+        if paths and paths[0].strokes:
+            current = QtGui.QColor(*paths[0].strokes[0].get(
+                'color', self.draw_brush_color))
         dialog = widgets.modern_ui.ColorPickerDialog(current, self)
-        dialog.color_changed.connect(self.draw_toolbar.set_color)
-        if dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted:
+        self._active_color_dialog = dialog
+
+        def preview(color):
+            self.draw_toolbar.set_color(color)
+            rgba = [color.red(), color.green(), color.blue(), color.alpha()]
+            for item, strokes in before.items():
+                recolored = copy.deepcopy(strokes)
+                for stroke in recolored:
+                    stroke['color'] = list(rgba)
+                item.replace_strokes(recolored)
+
+        dialog.color_changed.connect(preview)
+        result = dialog.exec()
+        self._active_color_dialog = None
+        if result == QtWidgets.QDialog.DialogCode.Accepted:
             color = dialog.selectedColor()
             self.draw_brush_color = [
                 color.red(), color.green(), color.blue(), color.alpha()]
@@ -914,11 +948,52 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 'Drawing/default_color',
                 color.name(QtGui.QColor.NameFormat.HexArgb))
             self.draw_toolbar.set_color(color)
+            if paths:
+                self.undo_stack.beginMacro('Recolor drawings')
+                try:
+                    for item in paths:
+                        after = copy.deepcopy(item.strokes)
+                        if after != before[item]:
+                            self.undo_stack.push(commands.ChangeDrawing(
+                                item, after, before[item],
+                                ignore_first_redo=True))
+                finally:
+                    self.undo_stack.endMacro()
             self.show_feedback(
                 f'Stroke color {color.name().upper()}', '●',
                 shortcut='Ctrl+T')
         else:
+            for item, strokes in before.items():
+                item.replace_strokes(strokes)
             self.draw_toolbar.set_color(current)
+
+    def _active_color_picker(self):
+        dialog = self._active_color_dialog
+        if dialog is not None and dialog.isVisible():
+            return dialog
+        for picker in (self.note_toolbar.color_popover,
+                       self.group_toolbar.color_popover):
+            if picker.isVisible():
+                return picker
+        return None
+
+    def _sample_active_color_picker(self):
+        """Live-sample the canvas beneath the pointer while Alt is held."""
+
+        picker = self._active_color_picker()
+        if picker is None:
+            return False
+        if not (QtWidgets.QApplication.keyboardModifiers()
+                & Qt.KeyboardModifier.AltModifier):
+            return False
+        viewport_pos = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
+        if not self.viewport().rect().contains(viewport_pos):
+            return False
+        color = self.scene.sample_color_at(self.mapToScene(viewport_pos))
+        if color is None:
+            return False
+        picker.set_color(color)
+        return True
 
     def on_action_set_brush_size(self):
         size, ok = QtWidgets.QInputDialog.getInt(
@@ -1432,11 +1507,11 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         logger.debug('Copying to clipboard...')
         self.cancel_active_modes()
         clipboard = QtWidgets.QApplication.clipboard()
-        items = self.scene.selectedItems(user_only=True)
+        items = self.scene.selection_with_group_contents()
 
         if not items:
             return
-        if len(items) == 1:
+        if len(items) == 1 and hasattr(items[0], 'copy_to_clipboard'):
             items[0].copy_to_clipboard(clipboard)
         else:
             image = self._render_selection_to_image(items)
@@ -1444,7 +1519,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 clipboard.setPixmap(QtGui.QPixmap.fromImage(image))
 
         # However, we can copy all items to the internal clipboard:
-        self.scene.copy_selection_to_internal_clipboard()
+        self.scene.copy_selection_to_internal_clipboard(items)
 
         # We set a marker for ourselves in the global clipboard so
         # that we know to look up the internal clipboard when pasting:
@@ -1901,6 +1976,17 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         return super().event(event)
 
     def mousePressEvent(self, event):
+        modifiers = event.modifiers()
+        if (event.button() == Qt.MouseButton.LeftButton
+                and isinstance(modifiers, Qt.KeyboardModifier)
+                and modifiers & Qt.KeyboardModifier.AltModifier
+                and self._active_color_picker() is not None):
+            picker = self._active_color_picker()
+            color = self.scene.sample_color_at(self.mapToScene(event.pos()))
+            if color is not None and picker is not None:
+                picker.set_color(color)
+            event.accept()
+            return
         if (event.button() == Qt.MouseButton.RightButton
                 and self.parent.isFullScreen()
                 and not sys.platform.startswith('win')):

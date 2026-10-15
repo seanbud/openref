@@ -105,7 +105,9 @@ class BeeItemMixin(SelectableMixin):
         self.setPos(pos - self.center_scene_coords)
 
     def has_selection_outline(self):
-        return self.isSelected()
+        scene = self.scene()
+        return (self.isSelected()
+                and not (scene and scene.active_mode == scene.RUBBERBAND_MODE))
 
     def has_selection_handles(self):
         return (self.isSelected()
@@ -923,6 +925,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             self.setPlainText(initial_text or '')
         if _safe_web_url(link_url) == self.standalone_link_url():
             self._activate_standalone_link(link_url)
+        self._last_visual_scene_rect = QtCore.QRectF()
         logger.debug(f'Initialized {self}')
 
     @classmethod
@@ -1156,9 +1159,17 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             callback(self, editing)
 
     def _document_changed(self):
+        old_rect = getattr(self, '_last_visual_scene_rect', QtCore.QRectF())
         self.prepareGeometryChange()
         self.update()
         scene = self.scene()
+        if scene is not None:
+            new_rect = self.sceneBoundingRect()
+            self._last_visual_scene_rect = QtCore.QRectF(new_rect)
+            if not old_rect.isEmpty():
+                scene.invalidate(
+                    old_rect.united(new_rect),
+                    QtWidgets.QGraphicsScene.SceneLayer.AllLayers)
         if scene is not None and self.shadow.get('enabled'):
             scene.sync_shadow_for(self, force=True)
         if self.edit_mode and not self._applying_state:
@@ -1810,7 +1821,7 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
     DEFAULT_LABEL_COLOR = '#c7cad5'
 
     def __init__(self, group_id=None, title='', frame_color=None,
-                 label_color=None, padding=20.0, frame_style='dash',
+                 label_color=None, padding=28.0, frame_style='dash',
                  fill_enabled=False, **kwargs):
         super().__init__()
         self.save_id = None
@@ -1824,6 +1835,7 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
                             else 'dash')
         self.fill_enabled = bool(fill_enabled)
         self.drop_highlighted = False
+        self.scope_active = False
         self._rect = QtCore.QRectF(0, 0, 1, 1)
         self._refreshing_bounds = False
         self.init_selectable()
@@ -1845,7 +1857,9 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         return f'Group "{self.title}"' if self.title else 'Group'
 
     def boundingRect(self):
-        return self._rect.adjusted(0, -24, 0, 0)
+        title_height = self.title_font_size() + 11 if self.title else 0
+        hit = self.fixed_length_for_viewport(12)
+        return self._rect.adjusted(-hit, -title_height - hit, hit, hit)
 
     def bounding_rect_unselected(self):
         return self.boundingRect()
@@ -1865,6 +1879,10 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         rect = self.scene().itemsBoundingRect(items=members).adjusted(
             -self.padding, -self.padding, self.padding, self.padding)
         new_rect = QtCore.QRectF(0, 0, rect.width(), rect.height())
+        member_z = min(member.zValue() for member in members)
+        target_z = member_z - self.scene().Z_STEP
+        if self.zValue() != target_z:
+            self.setZValue(target_z)
         if self.pos() == rect.topLeft() and self._rect == new_rect:
             return False
         self._refreshing_bounds = True
@@ -1875,6 +1893,7 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         finally:
             self._refreshing_bounds = False
         self.update()
+        # Structural chrome and its optional tint always stay behind content.
         return True
 
     def itemChange(self, change, value):
@@ -1901,10 +1920,34 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         # hit target does not steal clicks from content. It does make groups
         # far easier to select and drag than a one-pixel outline.
         ring = QtGui.QPainterPath()
-        ring.addRect(self._rect)
+        if self.scope_active:
+            hit = self.fixed_length_for_viewport(12)
+            outer = QtGui.QPainterPath()
+            outer.addRect(self._rect.adjusted(-hit, -hit, hit, hit))
+            inner = QtGui.QPainterPath()
+            inner.addRect(self._rect.adjusted(hit, hit, -hit, -hit))
+            ring = outer.subtracted(inner)
+        else:
+            ring.addRect(self._rect)
         if self.title:
             ring.addRect(QtCore.QRectF(0, -24, self._rect.width(), 24))
         return ring
+
+    def is_frame_hit(self, local_pos):
+        hit = self.fixed_length_for_viewport(12)
+        outer = self._rect.adjusted(-hit, -hit, hit, hit)
+        inner = self._rect.adjusted(hit, hit, -hit, -hit)
+        return outer.contains(local_pos) and not inner.contains(local_pos)
+
+    def title_font_size(self):
+        largest = max(self._rect.width(), self._rect.height())
+        if largest < 320:
+            return 13
+        if largest < 900:
+            return 18
+        if largest < 1800:
+            return 25
+        return 34
 
     def paint(self, painter, option, widget):
         painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
@@ -1924,7 +1967,10 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
                                 8, 8)
         if self.title:
             painter.setPen(QtGui.QColor(self.label_color))
-            painter.drawText(QtCore.QPointF(2, -8), self.title)
+            font = painter.font()
+            font.setPixelSize(self.title_font_size())
+            painter.setFont(font)
+            painter.drawText(QtCore.QPointF(2, -6), self.title)
         self.paint_selectable(painter, option, widget)
 
     def style_state(self):

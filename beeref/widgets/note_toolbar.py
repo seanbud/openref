@@ -33,6 +33,8 @@ class _NoteColorPopover(QtWidgets.QFrame):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.settings = BeeSettings()
         self._color = QtGui.QColor('#f3f4f6')
+        self._cycle_colors = []
+        self._cycle_index = 0
 
         self.field = _SaturationValueField(self)
         self.field.setFixedSize(178, 96)
@@ -166,6 +168,11 @@ class _NoteColorPopover(QtWidgets.QFrame):
         if parent is None:
             return
         self._refresh_swatches()
+        current = self._color_key(self._color)
+        self._cycle_colors = [
+            value for value in self._load_colors(self.RECENT_COLORS_KEY)
+            if value != current]
+        self._cycle_index = 0
         self.adjustSize()
         anchor_rect = anchor.geometry()
         width, height = self.width(), self.height()
@@ -199,6 +206,17 @@ class _NoteColorPopover(QtWidgets.QFrame):
             self.move(min(placed, key=overlap).topLeft())
         self.show()
         self.raise_()
+
+    def cycle_previous(self):
+        """Apply the next older recent color while the popover is open."""
+
+        if not self._cycle_colors:
+            return False
+        color = self._cycle_colors[
+            self._cycle_index % len(self._cycle_colors)]
+        self._cycle_index += 1
+        self.set_color(color)
+        return True
 
     def hideEvent(self, event):
         self._remember(self._color)
