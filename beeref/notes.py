@@ -56,6 +56,12 @@ class NoteEditingMixin:
             return selected[0]
         return None
 
+    def selected_notes(self):
+        if isinstance(self.scene.edit_item, BeeTextItem):
+            return [self.scene.edit_item]
+        return [item for item in self.scene.selectedItems(user_only=True)
+                if isinstance(item, BeeTextItem)]
+
     def refresh_note_tools(self):
         if not hasattr(self, 'note_toolbar'):
             return
@@ -63,14 +69,17 @@ class NoteEditingMixin:
             note = self.active_note()
         except RuntimeError:
             return  # Scene teardown can emit one final selection signal.
-        self.actiongroup_set_enabled('active_when_note', note is not None)
+        notes = self.selected_notes()
+        self.actiongroup_set_enabled('active_when_note', bool(notes))
         # Ctrl+I means Italic in note context, Insert Images elsewhere.
-        actions.actions['insert_images'].qaction.setEnabled(note is None)
+        actions.actions['insert_images'].qaction.setEnabled(not notes)
         has_selection = (note is not None and note.edit_mode
                          and note.textCursor().hasSelection())
         if (note is None or self.active_mode == self.DRAW_MODE
                 or not has_selection):
             self._note_toolbar_hide_timer.stop()
+            if self.note_toolbar.color_popover.isVisible():
+                return
             self.note_toolbar.hide()
             self.note_toolbar.hide_popovers()
             return
@@ -145,12 +154,19 @@ class NoteEditingMixin:
         return item
 
     def format_note(self, kind, value=None):
-        note = self.active_note()
-        if note is None:
+        notes = self.selected_notes()
+        if not notes:
             return
-        note.apply_format(kind, value)
-        if note.edit_mode:
-            note.setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
+        if len(notes) > 1:
+            self.undo_stack.beginMacro('Format notes')
+        try:
+            for note in notes:
+                note.apply_format(kind, value)
+                if note.edit_mode:
+                    note.setFocus(QtCore.Qt.FocusReason.OtherFocusReason)
+        finally:
+            if len(notes) > 1:
+                self.undo_stack.endMacro()
         self.refresh_note_tools()
 
     def style_note(self, appearance):
@@ -174,16 +190,19 @@ class NoteEditingMixin:
         self.format_note('strike')
 
     def on_action_note_color(self):
-        note = self.active_note()
-        if note is None or not note.edit_mode or not (
-                note.textCursor().hasSelection()):
+        notes = self.selected_notes()
+        if not notes:
             return
+        popover = self.note_toolbar.color_popover
+        if popover.isVisible():
+            popover.cycle_previous()
+            return
+        note = notes[0]
         self._note_toolbar_hide_timer.stop()
         self.note_toolbar.set_state(note.format_state())
-        rect = self.mapFromScene(note.sceneBoundingRect()).boundingRect()
+        scene_rect = self.scene.itemsBoundingRect(items=notes)
+        rect = self.mapFromScene(scene_rect).boundingRect()
         self.note_toolbar.reposition_for_rect(rect)
-        self.note_toolbar.show()
-        self.note_toolbar.raise_()
         self.note_toolbar._choose_text_color()
 
     def on_action_note_appearance(self):

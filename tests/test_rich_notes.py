@@ -98,6 +98,23 @@ def test_appearance_and_width_are_undoable_outside_editor(view):
     assert note.text_width == 300
 
 
+def test_color_format_applies_to_all_selected_notes_as_one_undo(view):
+    first = BeeTextItem('one')
+    second = BeeTextItem('two')
+    for note in (first, second):
+        view.scene.addItem(note)
+        note.setSelected(True)
+
+    view.format_note('color', '#ff3366')
+    assert '#ff3366' in first.document().toHtml().lower()
+    assert '#ff3366' in second.document().toHtml().lower()
+    assert view.undo_stack.count() == 1
+
+    view.undo_stack.undo()
+    assert '#ff3366' not in first.document().toHtml().lower()
+    assert '#ff3366' not in second.document().toHtml().lower()
+
+
 def test_non_edit_formatting_selects_all_and_is_one_board_undo(view):
     note = BeeTextItem(text='all of this', font_size=18, text_width=300)
     view.scene.addItem(note)

@@ -69,6 +69,12 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             QtGui.QBrush(QtGui.QColor(*constants.COLORS['Scene:Canvas'])))
         self.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         self.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        # Selection handles extend beyond Qt's native item paint bounds.
+        # Updating the union of changed bounds avoids stale handle pixels
+        # without repainting the full canvas every frame.
+        self.setViewportUpdateMode(
+            QtWidgets.QGraphicsView.ViewportUpdateMode
+            .BoundingRectViewportUpdate)
 
         self.undo_stack = QtGui.QUndoStack(self)
         self.undo_stack.setUndoLimit(100)
@@ -612,10 +618,13 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
 
     def on_action_cut(self):
         logger.debug('Cutting items...')
+        items = self.scene.selection_with_group_contents()
         self.on_action_copy()
+        if not items:
+            return
         self.undo_stack.push(
             commands.DeleteItems(
-                self.scene, self.scene.selectedItems(user_only=True)))
+                self.scene, items))
 
     def on_action_group_selection(self):
         if self.scene.group_selection():
@@ -1432,11 +1441,11 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         logger.debug('Copying to clipboard...')
         self.cancel_active_modes()
         clipboard = QtWidgets.QApplication.clipboard()
-        items = self.scene.selectedItems(user_only=True)
+        items = self.scene.selection_with_group_contents()
 
         if not items:
             return
-        if len(items) == 1:
+        if len(items) == 1 and hasattr(items[0], 'copy_to_clipboard'):
             items[0].copy_to_clipboard(clipboard)
         else:
             image = self._render_selection_to_image(items)
@@ -1444,7 +1453,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 clipboard.setPixmap(QtGui.QPixmap.fromImage(image))
 
         # However, we can copy all items to the internal clipboard:
-        self.scene.copy_selection_to_internal_clipboard()
+        self.scene.copy_selection_to_internal_clipboard(items)
 
         # We set a marker for ourselves in the global clipboard so
         # that we know to look up the internal clipboard when pasting:
@@ -1901,6 +1910,16 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         return super().event(event)
 
     def mousePressEvent(self, event):
+        modifiers = event.modifiers()
+        if (event.button() == Qt.MouseButton.LeftButton
+                and isinstance(modifiers, Qt.KeyboardModifier)
+                and modifiers & Qt.KeyboardModifier.AltModifier
+                and self.note_toolbar.color_popover.isVisible()):
+            color = self.scene.sample_color_at(self.mapToScene(event.pos()))
+            if color is not None:
+                self.note_toolbar.color_popover.set_color(color)
+            event.accept()
+            return
         if (event.button() == Qt.MouseButton.RightButton
                 and self.parent.isFullScreen()
                 and not sys.platform.startswith('win')):

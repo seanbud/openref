@@ -553,6 +553,73 @@ def test_group_membership_can_change_and_undo(view):
     assert second.group_id is None
 
 
+def test_group_scope_exposes_members_and_steps_out(view):
+    member = BeeTextItem('inside')
+    group = BeeGroupItem()
+    member.group_id = group.group_id
+    for item in (member, group):
+        view.scene.addItem(item)
+    group.refresh_bounds()
+    view.scene.sync_group_interaction_state()
+
+    assert member.acceptedMouseButtons() == Qt.MouseButton.NoButton
+    view.scene.enter_group_scope(group)
+    assert group.scope_active is True
+    assert member.acceptedMouseButtons() != Qt.MouseButton.NoButton
+    view.scene.exit_group_scope()
+    assert group.scope_active is False
+    assert member.acceptedMouseButtons() == Qt.MouseButton.NoButton
+
+
+def test_copy_and_paste_group_preserves_membership(view):
+    member = BeeTextItem('inside')
+    group = BeeGroupItem()
+    member.group_id = group.group_id
+    for item in (member, group):
+        view.scene.addItem(item)
+    group.refresh_bounds()
+    group.setSelected(True)
+
+    view.on_action_copy()
+    assert set(view.scene.internal_clipboard) == {group, member}
+    view.scene.paste_from_internal_clipboard(QtCore.QPointF(500, 500))
+
+    groups = list(view.scene.items_by_type('group'))
+    notes = list(view.scene.items_by_type('text'))
+    copied_group = next(item for item in groups if item is not group)
+    copied_note = next(item for item in notes if item is not member)
+    assert copied_note.group_id == copied_group.group_id
+
+
+def test_cutting_group_deletes_frame_and_members_without_crashing(view):
+    member = BeeTextItem('inside')
+    group = BeeGroupItem()
+    member.group_id = group.group_id
+    for item in (member, group):
+        view.scene.addItem(item)
+    group.refresh_bounds()
+    group.setSelected(True)
+
+    view.on_action_cut()
+    assert member.scene() is None
+    assert group.scene() is None
+    view.undo_stack.undo()
+    assert member.scene() is view.scene
+    assert group.scene() is view.scene
+
+
+def test_group_fill_stays_below_its_members(view):
+    member = BeeTextItem('inside')
+    group = BeeGroupItem(fill_enabled=True)
+    member.group_id = group.group_id
+    member.setZValue(4)
+    for item in (member, group):
+        view.scene.addItem(item)
+    group.refresh_bounds()
+
+    assert group.zValue() < member.zValue()
+
+
 def test_drop_target_highlights_and_accepts_an_item(view):
     member = BeeTextItem('inside')
     incoming = BeeTextItem('incoming')

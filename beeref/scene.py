@@ -158,6 +158,8 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._shadow_composites = {}
         self._rubberband_selection_mode = 'replace'
         self._rubberband_base_selection = set()
+        self._bulk_selecting = False
+        self.active_group_id = None
         self._group_drop_target = None
         self._shadow_resume_timer = QtCore.QTimer(self)
         self._shadow_resume_timer.setSingleShot(True)
@@ -180,6 +182,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._shadow_composites = {}
         self.used_space_rect = QtCore.QRectF()
         self.internal_clipboard = []
+        self.active_group_id = None
         self.rubberband_item = RubberbandItem()
         self.multi_select_item = MultiSelectItem()
         self._clear_ongoing = False
@@ -267,15 +270,45 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._rubberband_base_selection = set()
         self.active_mode = None
 
+    def _apply_selection_once(self, desired):
+        """Apply a marquee result with one overlay/layout recomputation."""
+
+        selected = set(self.selectedItems(user_only=True))
+        if selected == desired:
+            return
+        self._bulk_selecting = True
+        blocker = QtCore.QSignalBlocker(self)
+        try:
+            for item in selected - desired:
+                item.setSelected(False)
+            for item in desired - selected:
+                item.setSelected(True)
+        finally:
+            del blocker
+            self._bulk_selecting = False
+        self.on_selection_change()
+        self.selectionChanged.emit()
+
     def cancel_crop_mode(self):
         """Cancels an ongoing crop mode, if there is any."""
         if self.crop_item:
             self.crop_item.exit_crop_mode(confirm=False)
 
-    def copy_selection_to_internal_clipboard(self):
-        self.internal_clipboard = []
-        for item in self.selectedItems(user_only=True):
-            self.internal_clipboard.append(item)
+    def selection_with_group_contents(self):
+        """Return the selected logical objects, expanding group frames."""
+
+        selected = list(self.selectedItems(user_only=True))
+        expanded = set(selected)
+        for item in selected:
+            if getattr(item, 'TYPE', None) == 'group':
+                expanded.update(item.members())
+        # Stable scene order keeps copied layer relationships deterministic.
+        return [item for item in self.items_for_save() if item in expanded]
+
+    def copy_selection_to_internal_clipboard(self, items=None):
+        self.internal_clipboard = list(
+            items if items is not None
+            else self.selection_with_group_contents())
 
     def group_selection(self):
         """Create a persistent frame around two or more selected items."""
@@ -292,6 +325,75 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         groups = [item for item in self.selectedItems(user_only=True)
                   if getattr(item, 'TYPE', None) == 'group']
         return groups[0].group_id if len(groups) == 1 else None
+
+    def active_group(self):
+        return next((group for group in self.items_by_type('group')
+                     if group.group_id == self.active_group_id), None)
+
+    def enter_group_scope(self, group):
+        self.active_group_id = group.group_id
+        self.deselect_all_items()
+        self.sync_group_interaction_state()
+        group.update()
+
+    def exit_group_scope(self):
+        group = self.active_group()
+        self.active_group_id = None
+        self.sync_group_interaction_state()
+        if group is not None:
+            group.update()
+
+    def sync_group_interaction_state(self):
+        """Expose member hit targets only inside the active group scope."""
+
+        for group in self.items_by_type('group'):
+            active = group.group_id == self.active_group_id
+            if group.scope_active != active:
+                group.scope_active = active
+                group.prepareGeometryChange()
+                group.update()
+        for item in self.items_for_save():
+            if getattr(item, 'TYPE', None) == 'group':
+                continue
+            group_id = getattr(item, 'group_id', None)
+            enabled = (not group_id or group_id == self.active_group_id)
+            current = item.acceptedMouseButtons()
+            if enabled and current == Qt.MouseButton.NoButton:
+                item.setAcceptedMouseButtons(Qt.MouseButton.AllButtons)
+            elif not enabled and current != Qt.MouseButton.NoButton:
+                item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            if not enabled and item.isSelected():
+                item.setSelected(False)
+
+    def _interactive_item_at(self, position):
+        """Resolve a pointer target while respecting nested group scope."""
+
+        transform = (self.views()[0].transform()
+                     if self.views() else QtGui.QTransform())
+        direct = self.itemAt(position, transform)
+        if (direct is not None and direct not in (
+                self.multi_select_item, self.rubberband_item)
+                and hasattr(direct, 'save_id')):
+            group_id = getattr(direct, 'group_id', None)
+            if (getattr(direct, 'TYPE', None) == 'group' or not group_id
+                    or group_id == self.active_group_id):
+                return direct
+        if not isinstance(position, QtCore.QPointF):
+            return None
+        candidates = [direct] if direct is not None else []
+        candidates.extend(
+            item for item in self.items(position) if item is not direct)
+        for item in candidates:
+            if item in (self.multi_select_item, self.rubberband_item):
+                continue
+            if not hasattr(item, 'save_id'):
+                continue
+            group_id = getattr(item, 'group_id', None)
+            if (getattr(item, 'TYPE', None) != 'group' and group_id
+                    and group_id != self.active_group_id):
+                continue
+            return item
+        return None
 
     def change_group_membership(self, items, group_id):
         changes = {
@@ -380,13 +482,21 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         return enabled
 
     def paste_from_internal_clipboard(self, position, group_id=None):
+        pairs = [(item, item.create_copy())
+                 for item in self.internal_clipboard]
+        copied_group_ids = {
+            original.group_id: duplicate.group_id
+            for original, duplicate in pairs
+            if getattr(original, 'TYPE', None) == 'group'
+        }
         copies = []
-        for item in self.internal_clipboard:
-            copy = item.create_copy()
-            if getattr(copy, 'TYPE', None) != 'group':
-                copy.group_id = group_id
-            copies.append(copy)
+        for original, duplicate in pairs:
+            if getattr(duplicate, 'TYPE', None) != 'group':
+                duplicate.group_id = copied_group_ids.get(
+                    getattr(original, 'group_id', None), group_id)
+            copies.append(duplicate)
         self.undo_stack.push(commands.InsertItems(self, copies, position))
+        self.sync_groups()
 
     def raise_to_top(self):
         self.cancel_active_modes()
@@ -770,6 +880,10 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             return
 
         if event.button() == Qt.MouseButton.LeftButton:
+            scoped = self.active_group()
+            if (scoped is not None and not scoped._rect.contains(
+                    scoped.mapFromScene(event.scenePos()))):
+                self.exit_group_scope()
             modifiers = event.modifiers()
             valid_modifiers = isinstance(modifiers, Qt.KeyboardModifier)
             if (isinstance(modifiers, Qt.KeyboardModifier)
@@ -779,11 +893,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 # replaces the current selection for Shift before the item
                 # handler runs. Resolve the user item under overlays here so
                 # Shift-click is an equally valid additive-selection gesture.
-                item_at_pos = next((
-                    item for item in self.items(event.scenePos())
-                    if item is not self.multi_select_item
-                    and hasattr(item, 'save_id')
-                ), None)
+                item_at_pos = self._interactive_item_at(event.scenePos())
                 if item_at_pos is not None:
                     item_at_pos.setSelected(True)
                     if hasattr(item_at_pos, 'bring_to_front'):
@@ -793,18 +903,17 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                     return
             if (isinstance(modifiers, Qt.KeyboardModifier)
                     and modifiers & Qt.KeyboardModifier.AltModifier):
-                item_at_pos = next((
-                    item for item in self.items(event.scenePos())
-                    if item is not self.multi_select_item
-                    and hasattr(item, 'save_id')
-                ), None)
+                item_at_pos = self._interactive_item_at(event.scenePos())
                 if item_at_pos is not None:
                     item_at_pos.setSelected(False)
                     event.accept()
                     return
             self.event_start = event.scenePos()
-            item_at_pos = self.itemAt(
+            raw_item = self.itemAt(
                 event.scenePos(), self.views()[0].transform())
+            item_at_pos = (self.multi_select_item
+                           if raw_item is self.multi_select_item
+                           else self._interactive_item_at(event.scenePos()))
 
             if self.edit_item:
                 if item_at_pos != self.edit_item:
@@ -852,7 +961,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
 
     def mouseDoubleClickEvent(self, event):
         self.cancel_active_modes()
-        item = self.itemAt(event.scenePos(), self.views()[0].transform())
+        item = self._interactive_item_at(event.scenePos())
         if item:
             if getattr(item, 'TYPE', None) == 'path':
                 self.views()[0].enter_draw_mode(item)
@@ -862,7 +971,11 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 if not item.isSelected():
                     self.deselect_all_items()
                     item.setSelected(True)
-                self.views()[0].open_group_inspector(item)
+                local = item.mapFromScene(event.scenePos())
+                if item.is_frame_hit(local):
+                    self.views()[0].open_group_inspector(item)
+                else:
+                    self.enter_group_scope(item)
                 event.accept()
                 return
             if not item.isSelected():
@@ -897,11 +1010,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
                 desired = self._rubberband_base_selection - hits
             else:
                 desired = hits
-            selected = set(self.selectedItems(user_only=True))
-            for item in selected - desired:
-                item.setSelected(False)
-            for item in desired - selected:
-                item.setSelected(True)
+            self._apply_selection_once(desired)
             self.views()[0].reset_previous_transform()
         elif self.active_mode == self.MOVE_MODE:
             self.suspend_shadow_rendering('scene-move')
@@ -1007,7 +1116,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         return (rect.topLeft() + rect.bottomRight()) / 2
 
     def on_selection_change(self):
-        if self._clear_ongoing:
+        if self._clear_ongoing or self._bulk_selecting:
             # Ignore events while clearing the scene since the
             # multiselect item will get cleared, too
             return
@@ -1057,6 +1166,7 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         try:
             for group in list(self.items_by_type('group')):
                 group.refresh_bounds()
+            self.sync_group_interaction_state()
         finally:
             self._syncing_groups = False
 
