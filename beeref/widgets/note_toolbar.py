@@ -35,6 +35,7 @@ class _NoteColorPopover(QtWidgets.QFrame):
         self._color = QtGui.QColor('#f3f4f6')
         self._cycle_colors = []
         self._cycle_index = 0
+        self._swatch_buttons = {}
 
         self.field = _SaturationValueField(self)
         self.field.setFixedSize(178, 96)
@@ -97,6 +98,7 @@ class _NoteColorPopover(QtWidgets.QFrame):
 
     def _refresh_swatches(self):
         self._clear_swatches()
+        self._swatch_buttons = {}
         pinned = set(self._load_colors(self.PINNED_COLORS_KEY))
         for index, value in enumerate(self._colors_for_grid()):
             button = QtWidgets.QToolButton(self.swatches)
@@ -104,9 +106,7 @@ class _NoteColorPopover(QtWidgets.QFrame):
             button.setFixedSize(25, 18)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setStyleSheet(
-                'QToolButton { background: ' + value + '; border: 1px solid '
-                'rgba(255, 255, 255, 45); border-radius: 4px; } '
-                'QToolButton:hover { border: 1px solid #ffffff; }')
+                self._swatch_style(value))
             label = 'Pinned' if value in pinned else 'Recent color'
             button.setToolTip(f'{label}: {value}\nRight-click to '
                               f'{"unpin" if value in pinned else "pin"}')
@@ -119,6 +119,34 @@ class _NoteColorPopover(QtWidgets.QFrame):
                 self._set_pinned(choice, not is_pinned))
             self.swatch_layout.addWidget(
                 button, index // self.COLUMNS, index % self.COLUMNS)
+            self._swatch_buttons[value] = button
+
+    @staticmethod
+    def _swatch_style(value, ping=False):
+        border = ('2px solid #ffffff' if ping else
+                  '1px solid rgba(255, 255, 255, 45)')
+        return (
+            'QToolButton { background: ' + value + '; border: ' + border +
+            '; border-radius: 4px; } '
+            'QToolButton:hover { border: 1px solid #ffffff; }')
+
+    def _ping_swatch(self, color):
+        """Briefly identify the history color chosen by keyboard cycling."""
+
+        value = self._color_key(color)
+        button = self._swatch_buttons.get(value)
+        if button is None:
+            return
+        button.setProperty('colorPing', True)
+        button.setStyleSheet(self._swatch_style(value, ping=True))
+
+        def restore():
+            if self._swatch_buttons.get(value) is not button:
+                return
+            button.setProperty('colorPing', False)
+            button.setStyleSheet(self._swatch_style(value))
+
+        QtCore.QTimer.singleShot(260, restore)
 
     def _set_pinned(self, value, pinned):
         value = self._color_key(value)
@@ -216,6 +244,7 @@ class _NoteColorPopover(QtWidgets.QFrame):
             self._cycle_index % len(self._cycle_colors)]
         self._cycle_index += 1
         self.set_color(color)
+        self._ping_swatch(color)
         return True
 
     def hideEvent(self, event):

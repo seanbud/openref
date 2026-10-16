@@ -720,6 +720,20 @@ def test_group_style_defaults_transparent_and_is_undoable(view):
     assert group.style_state() == before
 
 
+def test_group_title_keeps_keyboard_focus_while_typing(view, qtbot):
+    group = BeeGroupItem()
+    view.scene.addItem(group)
+    view.show()
+    view.open_group_inspector(group)
+    editor = view.group_toolbar.title_edit
+
+    qtbot.keyClicks(editor, 'alpha')
+
+    assert editor.hasFocus()
+    assert editor.text() == 'alpha'
+    assert group.title == 'alpha'
+
+
 def test_drop_shadow_can_be_toggled_off_immediately(view):
     note = BeeTextItem('Depth')
     view.scene.addItem(note)

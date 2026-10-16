@@ -1017,6 +1017,12 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         super().mouseMoveEvent(event)
         if self.active_mode == self.MOVE_MODE:
             self._update_group_drop_target()
+            # Selection handles paint outside their item's content bounds.
+            # A full clear while moving prevents the backing store from
+            # retaining old handle pixels without imposing this cost while
+            # the canvas is otherwise idle.
+            for view in self.views():
+                view.viewport().update()
 
     def mouseReleaseEvent(self, event):
         completed_mode = self.active_mode
@@ -1042,6 +1048,9 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             self._set_group_drop_target(None)
         self.sync_groups()
         self.schedule_used_space_refresh()
+        if completed_mode == self.MOVE_MODE:
+            for view in self.views():
+                view.viewport().update()
 
     def selectedItems(self, user_only=False):
         """If ``user_only`` is set to ``True``, only return items added

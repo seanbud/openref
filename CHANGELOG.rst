@@ -1,3 +1,22 @@
+0.8.0 beta 3
+============
+
+Fixed
+-----
+
+* Text resize handles and selection outlines are fully cleared while notes are
+  dragged or edited, eliminating stale visual trails.
+* Group-title editing retains keyboard focus while live, undoable style
+  updates are applied.
+* Multi-item clipboard images preserve native canvas dimensions instead of
+  downsampling ordinary wide selections.
+
+Polish
+------
+
+* Repeated Ctrl/Cmd + T color-history cycling briefly highlights the selected
+  palette swatch so the change is visually legible.
+
 0.8.0 beta 1
 ============
 

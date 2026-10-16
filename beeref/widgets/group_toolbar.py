@@ -41,8 +41,7 @@ class GroupToolbar(QtWidgets.QFrame):
         self.title_edit.setObjectName('groupTitleEdit')
         self.title_edit.setPlaceholderText('Group title')
         self.title_edit.setFixedWidth(126)
-        self.title_edit.textEdited.connect(
-            lambda value: self._change(title=value))
+        self.title_edit.textEdited.connect(self._title_edited)
         layout.addWidget(self.title_edit)
 
         self.color_button = QtWidgets.QToolButton(self)
@@ -118,6 +117,17 @@ class GroupToolbar(QtWidgets.QFrame):
     def _change(self, **changes):
         self._state.update(changes)
         self.set_state(self._state)
+        self.style_changed.emit(dict(self._state))
+
+    def _title_edited(self, value):
+        """Commit title edits without rebuilding the focused line edit.
+
+        Calling ``set_state`` here replaces the editor text on every key
+        stroke.  Besides resetting its cursor, that can let the canvas regain
+        focus while the resulting undo command updates the group geometry.
+        """
+
+        self._state['title'] = value
         self.style_changed.emit(dict(self._state))
 
     def _show_color(self):
