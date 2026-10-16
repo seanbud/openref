@@ -1170,6 +1170,12 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
                 scene.invalidate(
                     old_rect.united(new_rect),
                     QtWidgets.QGraphicsScene.SceneLayer.AllLayers)
+            if self.isSelected() or self.edit_mode:
+                # Text selection affordances extend beyond the document's
+                # geometry.  Clear the viewport while their bounds are
+                # changing so stale corners are not left in the backing store.
+                for view in scene.views():
+                    view.viewport().update()
         if scene is not None and self.shadow.get('enabled'):
             scene.sync_shadow_for(self, force=True)
         if self.edit_mode and not self._applying_state:

@@ -343,7 +343,11 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if before != state:
             self.undo_stack.push(commands.ChangeGroupStyle(
                 group, before, state))
-            self._reposition_group_toolbar()
+            # Repositioning calls show()/raise_().  Leave a title editor that
+            # is actively receiving keys completely alone; its final geometry
+            # can be reconciled as soon as focus leaves the field.
+            if not self.group_toolbar.title_edit.hasFocus():
+                self._reposition_group_toolbar()
 
     def _reposition_group_toolbar(self, focus=False):
         group = getattr(self, '_inspected_group', None)
@@ -1460,12 +1464,29 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if source.isNull() or source.isEmpty():
             return QtGui.QImage()
 
-        # Clipboard images are canvas-resolution exports, not screenshots of
-        # the current zoom. Cap only pathological boards while preserving the
-        # complete composition and its aspect ratio.
+        # Clipboard images are canvas-resolution, lossless exports rather than
+        # screenshots of the current zoom.  Keep the native dimensions for
+        # normal boards.  Only guard against an allocation large enough to
+        # destabilize the application (roughly 512 MiB of ARGB pixels).
         width = max(1, int(math.ceil(source.width())))
         height = max(1, int(math.ceil(source.height())))
-        scale = min(1.0, 8192 / max(width, height))
+        # Imported images are often displayed below 100% to keep their first
+        # appearance manageable.  Recover their source-pixel density for a
+        # mixed-selection export instead of baking that display scale into a
+        # blurry clipboard image.
+        native_scale = 1.0
+        for item in items:
+            if not isinstance(item, BeePixmapItem):
+                continue
+            bounds = item.sceneBoundingRect()
+            if bounds.width() > 0 and bounds.height() > 0:
+                native_scale = max(
+                    native_scale,
+                    item.pixmap().width() / bounds.width(),
+                    item.pixmap().height() / bounds.height())
+        max_pixels = 128 * 1024 * 1024
+        scale = min(native_scale,
+                    math.sqrt(max_pixels / (width * height)))
         target_size = QtCore.QSize(
             max(1, int(math.ceil(width * scale))),
             max(1, int(math.ceil(height * scale))))

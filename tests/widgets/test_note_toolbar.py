@@ -77,3 +77,8 @@ def test_repeated_color_shortcut_can_cycle_older_recent_colors(
     with qtbot.waitSignal(popover.color_changed) as signal:
         assert popover.cycle_previous()
     assert signal.args[0].name() == '#ff0000'
+    swatch = popover._swatch_buttons['#FFFF0000']
+    assert swatch.property('colorPing') is True
+    assert '2px solid #ffffff' in swatch.styleSheet()
+    qtbot.wait(300)
+    assert swatch.property('colorPing') is False

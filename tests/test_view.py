@@ -772,6 +772,37 @@ def test_on_action_copy_multiple_items_renders_one_image(clipboard_mock, view):
     assert mimedata.data('beeref/items') == b'2'
 
 
+def test_selection_clipboard_keeps_native_dimensions_past_legacy_cap(view):
+    """Wide selections must not silently lose pixels at 8192px."""
+
+    image = QtGui.QImage(2, 2, QtGui.QImage.Format.Format_ARGB32)
+    image.fill(QtGui.QColor('#ffffff'))
+    left, right = BeePixmapItem(image), BeePixmapItem(image)
+    right.setPos(9000, 0)
+    view.scene.addItem(left)
+    view.scene.addItem(right)
+
+    rendered = view._render_selection_to_image([left, right])
+
+    assert rendered.width() == 9002
+    assert rendered.height() == 2
+
+
+def test_selection_clipboard_recovers_scaled_image_pixel_density(view):
+    image = QtGui.QImage(100, 20, QtGui.QImage.Format.Format_ARGB32)
+    image.fill(QtGui.QColor('#ffffff'))
+    picture = BeePixmapItem(image)
+    picture.setScale(0.25)
+    note = BeeTextItem('label')
+    note.setPos(30, 0)
+    view.scene.addItem(picture)
+    view.scene.addItem(note)
+
+    rendered = view._render_selection_to_image([picture, note])
+
+    assert rendered.width() >= 100
+
+
 def test_frameless_window_has_edge_resize_fallback(main_window):
     main_window.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
     edge = main_window.frameGeometry().topLeft()
