@@ -122,7 +122,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self._zoom_settle_timer.setInterval(140)
         self._zoom_settle_timer.timeout.connect(self._finish_zoom_interaction)
         self._zoom_interaction_active = False
-        self._active_color_dialog = None
+        self._color_session = None
         self._color_sample_timer = QtCore.QTimer(self)
         self._color_sample_timer.setInterval(35)
         self._color_sample_timer.timeout.connect(
@@ -160,11 +160,21 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                         *self.draw_toolbar.findChildren(QtWidgets.QWidget)):
             control.installEventFilter(self)
         self.draw_toolbar.hide()
+        self.color_popover = widgets.note_toolbar._NoteColorPopover(
+            self.viewport())
+        self.color_popover.color_changed.connect(
+            self._preview_color_popover)
+        self.color_popover.closed.connect(self._commit_color_popover)
+        self._color_anchor = QtWidgets.QWidget(self.viewport())
+        self._color_anchor.setFixedSize(1, 1)
+        self._color_anchor.hide()
         self.init_note_tools()
         self.group_toolbar = widgets.group_toolbar.GroupToolbar(
-            self.viewport())
+            self.viewport(), color_popover=self.color_popover)
         self.group_toolbar.style_changed.connect(self._style_active_group)
         self.group_toolbar.dismissed.connect(self._close_group_inspector)
+        self.group_toolbar.color_requested.connect(
+            lambda: self._open_color_popover(self.group_toolbar))
         self._inspected_group = None
         self.selection_modifier_badge = QtWidgets.QLabel(self.viewport())
         self.selection_modifier_badge.setFixedSize(18, 18)
@@ -306,7 +316,8 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self.welcome_overlay.show()
             self.actiongroup_set_enabled('active_when_items_in_scene', False)
         else:
-            if self.scene.edit_item is None:
+            if (self.scene.edit_item is None
+                    and not self.group_toolbar.title_edit.hasFocus()):
                 self.setFocus()
             self.welcome_overlay.clearFocus()
             self.welcome_overlay.hide()
@@ -315,7 +326,8 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 'active_when_items_in_scene', has_items)
         self.recalc_scene_rect()
         self.refresh_note_tools()
-        self._reposition_group_toolbar()
+        if not self.group_toolbar.title_edit.hasFocus():
+            self._reposition_group_toolbar()
 
     def on_can_redo_changed(self, can_redo):
         self.actiongroup_set_enabled('active_when_can_redo', can_redo)
@@ -358,6 +370,9 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self.group_toolbar.show_for(rect, focus=focus)
 
     def _close_group_inspector(self):
+        if (self._color_session is not None
+                and self._color_session['groups']):
+            self.color_popover.hide()
         self._inspected_group = None
 
     def _update_selection_modifier_badge(self, modifiers, position=None):
@@ -618,7 +633,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
     def on_action_delete_items(self):
         logger.debug('Deleting items...')
         self.cancel_active_modes()
-        selected = self.scene.selectedItems(user_only=True)
+        selected = self.scene.selection_with_group_contents()
         self.undo_stack.push(
             commands.DeleteItems(
                 self.scene, selected))
@@ -922,64 +937,114 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                                shortcut='[  ]', duration=900)
 
     def on_action_set_brush_color(self):
-        paths = [item for item in self.scene.selectedItems(user_only=True)
+        self._open_color_popover(self.draw_toolbar)
+
+    def _open_color_popover(self, anchor=None):
+        """Edit notes, vectors and frames through one shared color palette."""
+
+        if self.color_popover.isVisible():
+            if anchor is None:
+                self.color_popover.cycle_previous()
+                return
+            self.color_popover.hide()
+
+        selected = self.scene.selectedItems(user_only=True)
+        notes = self.selected_notes()
+        paths = [item for item in selected
                  if getattr(item, 'TYPE', None) == 'path']
-        before = {item: copy.deepcopy(item.strokes) for item in paths}
-        current = QtGui.QColor(*self.draw_brush_color)
-        if paths and paths[0].strokes:
-            current = QtGui.QColor(*paths[0].strokes[0].get(
+        groups = [item for item in selected
+                  if getattr(item, 'TYPE', None) == 'group']
+        if notes:
+            initial = QtGui.QColor(notes[0].format_state()['color'])
+        elif paths and paths[0].strokes:
+            initial = QtGui.QColor(*paths[0].strokes[0].get(
                 'color', self.draw_brush_color))
-        dialog = widgets.modern_ui.ColorPickerDialog(current, self)
-        self._active_color_dialog = dialog
+        elif groups:
+            initial = QtGui.QColor(groups[0].frame_color)
+        else:
+            initial = QtGui.QColor(*self.draw_brush_color)
+        self._color_session = {
+            'selection': set(selected),
+            'notes': {item: item.text_state() for item in notes},
+            'paths': {item: copy.deepcopy(item.strokes) for item in paths},
+            'groups': {item: item.style_state() for item in groups},
+            'draw_default': not (notes or groups) or bool(paths),
+        }
+        self.app.installEventFilter(self)
+        self.color_popover.set_color(initial, emit=False)
+        if anchor is None or not anchor.isVisible():
+            pointer = self.viewport().mapFromGlobal(QtGui.QCursor.pos())
+            if not self.viewport().rect().contains(pointer):
+                pointer = self.viewport().rect().center()
+            self._color_anchor.move(pointer)
+            anchor = self._color_anchor
+        self.color_popover.show_for(anchor)
 
-        def preview(color):
+    def _preview_color_popover(self, color):
+        session = self._color_session
+        if session is None:
+            return
+        for note in session['notes']:
+            if note.scene() is self.scene:
+                note.apply_format('color', color, record_undo=False)
+        rgba = [color.red(), color.green(), color.blue(), color.alpha()]
+        for path, before in session['paths'].items():
+            if path.scene() is not self.scene:
+                continue
+            recolored = copy.deepcopy(before)
+            for stroke in recolored:
+                stroke['color'] = list(rgba)
+            path.replace_strokes(recolored)
+        for group, before in session['groups'].items():
+            if group.scene() is self.scene:
+                color_format = (QtGui.QColor.NameFormat.HexArgb
+                                if color.alpha() < 255 else
+                                QtGui.QColor.NameFormat.HexRgb)
+                group.apply_style(dict(
+                    before, frame_color=color.name(color_format)))
+        if session['draw_default']:
+            self.draw_brush_color = list(rgba)
             self.draw_toolbar.set_color(color)
-            rgba = [color.red(), color.green(), color.blue(), color.alpha()]
-            for item, strokes in before.items():
-                recolored = copy.deepcopy(strokes)
-                for stroke in recolored:
-                    stroke['color'] = list(rgba)
-                item.replace_strokes(recolored)
 
-        dialog.color_changed.connect(preview)
-        result = dialog.exec()
-        self._active_color_dialog = None
-        if result == QtWidgets.QDialog.DialogCode.Accepted:
-            color = dialog.selectedColor()
-            self.draw_brush_color = [
-                color.red(), color.green(), color.blue(), color.alpha()]
+    def _commit_color_popover(self):
+        session = self._color_session
+        self._color_session = None
+        if session is None:
+            return
+        self.app.removeEventFilter(self)
+        changes = []
+        for note, before in session['notes'].items():
+            if note.scene() is self.scene and not note.edit_mode:
+                after = note.text_state()
+                if after != before:
+                    changes.append(commands.ChangeText(note, after, before))
+        for path, before in session['paths'].items():
+            if path.scene() is self.scene:
+                after = copy.deepcopy(path.strokes)
+                if after != before:
+                    changes.append(commands.ChangeDrawing(
+                        path, after, before, ignore_first_redo=True))
+        for group, before in session['groups'].items():
+            if group.scene() is self.scene:
+                after = group.style_state()
+                if after != before:
+                    changes.append(commands.ChangeGroupStyle(
+                        group, before, after))
+        if changes:
+            self.undo_stack.beginMacro('Recolor selection')
+            try:
+                for change in changes:
+                    self.undo_stack.push(change)
+            finally:
+                self.undo_stack.endMacro()
+        if session['draw_default']:
+            color = QtGui.QColor(*self.draw_brush_color)
             self.settings.setValue(
                 'Drawing/default_color',
                 color.name(QtGui.QColor.NameFormat.HexArgb))
-            self.draw_toolbar.set_color(color)
-            if paths:
-                self.undo_stack.beginMacro('Recolor drawings')
-                try:
-                    for item in paths:
-                        after = copy.deepcopy(item.strokes)
-                        if after != before[item]:
-                            self.undo_stack.push(commands.ChangeDrawing(
-                                item, after, before[item],
-                                ignore_first_redo=True))
-                finally:
-                    self.undo_stack.endMacro()
-            self.show_feedback(
-                f'Stroke color {color.name().upper()}', '●',
-                shortcut='Ctrl+T')
-        else:
-            for item, strokes in before.items():
-                item.replace_strokes(strokes)
-            self.draw_toolbar.set_color(current)
 
     def _active_color_picker(self):
-        dialog = self._active_color_dialog
-        if dialog is not None and dialog.isVisible():
-            return dialog
-        for picker in (self.note_toolbar.color_popover,
-                       self.group_toolbar.color_popover):
-            if picker.isVisible():
-                return picker
-        return None
+        return self.color_popover if self.color_popover.isVisible() else None
 
     def _sample_active_color_picker(self):
         """Live-sample the canvas beneath the pointer while Alt is held."""
@@ -1524,6 +1589,20 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             del blocker
         return image
 
+    @staticmethod
+    def _set_clipboard_image(clipboard, image):
+        """Publish a lossless image with explicit alpha for other apps."""
+
+        mime = QtCore.QMimeData()
+        mime.setImageData(image)
+        encoded = QtCore.QByteArray()
+        buffer = QtCore.QBuffer(encoded)
+        buffer.open(QtCore.QIODevice.OpenModeFlag.WriteOnly)
+        image.save(buffer, 'PNG')
+        buffer.close()
+        mime.setData('image/png', encoded)
+        clipboard.setMimeData(mime)
+
     def on_action_copy(self):
         logger.debug('Copying to clipboard...')
         self.cancel_active_modes()
@@ -1532,12 +1611,14 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
 
         if not items:
             return
-        if len(items) == 1 and hasattr(items[0], 'copy_to_clipboard'):
+        if len(items) == 1 and isinstance(items[0], BeePixmapItem):
+            self._set_clipboard_image(clipboard, items[0].pixmap().toImage())
+        elif len(items) == 1 and hasattr(items[0], 'copy_to_clipboard'):
             items[0].copy_to_clipboard(clipboard)
         else:
             image = self._render_selection_to_image(items)
             if not image.isNull():
-                clipboard.setPixmap(QtGui.QPixmap.fromImage(image))
+                self._set_clipboard_image(clipboard, image)
 
         # However, we can copy all items to the internal clipboard:
         self.scene.copy_selection_to_internal_clipboard(items)
@@ -1626,6 +1707,9 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             return
         logger.debug('Currently selected items: %s',
                      len(selected_items))
+        if (self._color_session is not None
+                and set(selected_items) != self._color_session['selection']):
+            self.color_popover.hide()
         self.actiongroup_set_enabled('active_when_selection',
                                      bool(selected_items))
         self.actiongroup_set_enabled('active_when_single_image',
@@ -1640,7 +1724,10 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 actions.actions['grayscale'].qaction.setChecked(grayscale)
             finally:
                 self._syncing_actions = False
-        self.viewport().repaint()
+        # repaint() enters Qt's graphics paint immediately, including while
+        # a command is still changing item ownership and shadow proxies.
+        # Queue the repaint so the scene is complete before Qt draws it.
+        self.viewport().update()
         self.refresh_note_tools()
         if (self._inspected_group is not None
                 and self._inspected_group not in selected_items):
@@ -1939,6 +2026,25 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
     def eventFilter(self, watched, event):
         """Track the configured eraser modifier across drawing controls."""
 
+        if (getattr(self, '_color_session', None) is not None
+                and event.type() == QtCore.QEvent.Type.MouseButtonPress
+                and not event.modifiers() & Qt.KeyboardModifier.AltModifier):
+            widget = (watched if isinstance(watched, QtWidgets.QWidget)
+                      else None)
+            inside_palette = False
+            while widget is not None:
+                if widget is self.color_popover:
+                    inside_palette = True
+                    break
+                widget = widget.parentWidget()
+            if not inside_palette:
+                self.color_popover.hide()
+        if (getattr(self, '_color_session', None) is not None
+                and event.type() in (
+                    QtCore.QEvent.Type.ApplicationDeactivate,
+                    QtCore.QEvent.Type.WindowDeactivate)
+                and watched in (self.app, self.window())):
+            self.color_popover.hide()
         if watched is self.viewport() and self._handle_native_gesture(event):
             return True
         if (event.type() in (QtCore.QEvent.Type.KeyPress,
@@ -2008,6 +2114,8 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 picker.set_color(color)
             event.accept()
             return
+        if self.color_popover.isVisible():
+            self.color_popover.hide()
         if (event.button() == Qt.MouseButton.RightButton
                 and self.parent.isFullScreen()
                 and not sys.platform.startswith('win')):
@@ -2274,6 +2382,11 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self._hud_toast.reposition()
 
     def keyPressEvent(self, event):
+        if (event.key() == Qt.Key.Key_Escape
+                and self.color_popover.isVisible()):
+            self.color_popover.hide()
+            event.accept()
+            return
         self._update_selection_modifier_badge(event.modifiers())
         note_action = self.note_key_action(event)
         if note_action:
@@ -2307,7 +2420,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 return
             if (event.key() == Qt.Key.Key_T
                     and modifiers & Qt.KeyboardModifier.ControlModifier):
-                self.on_action_set_brush_color()
+                self._open_color_popover()
                 event.accept()
                 return
             tool_keys = {

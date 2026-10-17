@@ -174,7 +174,7 @@ actions = ActionList([
     Action(id='note_strike', text='Strikethrough', shortcuts=['Ctrl+Shift+X'],
            callback='on_action_note_strike', group='active_when_note'),
     Action(id='note_color', text='Text Color…', shortcuts=['Ctrl+T'],
-           callback='on_action_note_color', group='active_when_note'),
+           callback='on_action_note_color'),
     Action(id='note_appearance', text='Note Appearance…',
            callback='on_action_note_appearance', group='active_when_note'),
     Action(id='paste_plain', text='Paste as Plain Text',
@@ -526,7 +526,6 @@ actions = ActionList([
     Action(
         id='set_brush_color',
         text='Brush &Color...',
-        shortcuts=['Ctrl+T'],
         callback='on_action_set_brush_color',
     ),
     Action(

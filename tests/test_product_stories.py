@@ -33,11 +33,9 @@ def test_first_dialog_uses_documents_folder(view, tmp_path):
 
 def test_color_choice_persists_as_next_session_default(view, settings):
     chosen = QtGui.QColor('#7ac5e2')
-    with patch('beeref.widgets.modern_ui.ColorPickerDialog') as dialog:
-        dialog.return_value.exec.return_value = (
-            QtWidgets.QDialog.DialogCode.Accepted)
-        dialog.return_value.selectedColor.return_value = chosen
-        view.on_action_set_brush_color()
+    view.on_action_set_brush_color()
+    view.color_popover.set_color(chosen)
+    view.color_popover.hide()
     assert settings.value('Drawing/default_color') == '#ff7ac5e2'
 
     from beeref.view import BeeGraphicsView
@@ -76,17 +74,117 @@ def test_brush_color_picker_recolors_selected_vectors_as_one_undo(view):
     item.setSelected(True)
     chosen = QtGui.QColor('#7ac5e2')
 
-    with patch('beeref.widgets.modern_ui.ColorPickerDialog') as dialog:
-        picker = dialog.return_value
-        picker.exec.return_value = QtWidgets.QDialog.DialogCode.Accepted
-        picker.selectedColor.return_value = chosen
-        picker.color_changed.connect.side_effect = (
-            lambda callback: callback(chosen))
-        view.on_action_set_brush_color()
+    view.on_action_set_brush_color()
+    view.color_popover.set_color(chosen)
+    view.color_popover.hide()
 
     assert item.strokes[0]['color'] == [122, 197, 226, 255]
     view.undo_stack.undo()
     assert item.strokes[0]['color'] == [255, 255, 255, 255]
+
+
+def test_one_color_palette_recolors_selected_note_and_drawing(view):
+    note = BeeTextItem('Color me')
+    second_note = BeeTextItem('And me')
+    drawing = BeePathItem([{
+        'tool': 'line', 'style': 'solid', 'base_size': 4,
+        'color': [255, 255, 255, 255],
+        'points': [{'x': 0, 'y': 0}, {'x': 30, 'y': 0}],
+    }])
+    view.scene.addItem(note)
+    view.scene.addItem(second_note)
+    view.scene.addItem(drawing)
+    note.setSelected(True)
+    second_note.setSelected(True)
+    drawing.setSelected(True)
+    before_note = note.text_state()
+    before_second_note = second_note.text_state()
+    before_brush = (note.document().firstBlock().begin().fragment()
+                    .charFormat().foreground())
+
+    view.on_action_note_color()
+    assert view.note_toolbar.color_popover is view.color_popover
+    assert view.group_toolbar.color_popover is view.color_popover
+    assert view.color_popover.isVisible()
+    view.color_popover.set_color(QtGui.QColor('#e34f7b'))
+    view.color_popover.hide()
+
+    assert note.text_state() != before_note
+    assert second_note.text_state() != before_second_note
+    for item in (note, second_note):
+        foreground = (item.document().firstBlock().begin().fragment()
+                      .charFormat().foreground().color())
+        assert foreground.name() == '#e34f7b'
+    assert drawing.strokes[0]['color'] == [227, 79, 123, 255]
+    view.undo_stack.undo()
+    restored_brush = (note.document().firstBlock().begin().fragment()
+                      .charFormat().foreground())
+    assert restored_brush == before_brush
+    assert drawing.strokes[0]['color'] == [255, 255, 255, 255]
+
+
+def test_color_palette_closes_when_selection_changes(view):
+    note = BeeTextItem('Color me')
+    view.scene.addItem(note)
+    note.setSelected(True)
+    view.on_action_note_color()
+    assert view.color_popover.isVisible()
+
+    note.setSelected(False)
+
+    assert not view.color_popover.isVisible()
+
+
+def test_ctrl_t_opens_shared_palette_for_selected_note_and_drawing(
+        view, qtbot):
+    note = BeeTextItem('Color me')
+    drawing = BeePathItem([{
+        'tool': 'line', 'style': 'solid', 'base_size': 4,
+        'color': [255, 255, 255, 255],
+        'points': [{'x': 0, 'y': 0}, {'x': 30, 'y': 0}],
+    }])
+    view.scene.addItem(note)
+    view.scene.addItem(drawing)
+    note.setSelected(True)
+    drawing.setSelected(True)
+    view.show()
+    view.setFocus()
+
+    qtbot.keyClick(view, Qt.Key.Key_T, Qt.KeyboardModifier.ControlModifier)
+
+    assert view.color_popover.isVisible()
+    assert set(view._color_session['notes']) == {note}
+    assert set(view._color_session['paths']) == {drawing}
+
+
+def test_shared_palette_closes_on_outside_click(view, qtbot):
+    note = BeeTextItem('Color me')
+    view.scene.addItem(note)
+    note.setSelected(True)
+    view.show()
+    view.on_action_note_color()
+    assert view.color_popover.isVisible()
+
+    qtbot.mouseClick(view.viewport(), Qt.MouseButton.LeftButton,
+                     pos=view.viewport().rect().bottomRight())
+
+    assert not view.color_popover.isVisible()
+
+
+def test_group_frame_color_uses_shared_palette(view):
+    group = BeeGroupItem()
+    view.scene.addItem(group)
+    group.setSelected(True)
+    view.open_group_inspector(group)
+    original = group.frame_color
+
+    view.group_toolbar.color_button.click()
+    view.color_popover.set_color(QtGui.QColor(112, 128, 192, 128))
+    view.color_popover.hide()
+
+    assert group.frame_color == '#807080c0'
+    view.undo_stack.undo()
+    assert group.frame_color == original
 
 
 def test_new_text_shortcut_exits_draw_mode(qtbot, view):
@@ -727,11 +825,56 @@ def test_group_title_keeps_keyboard_focus_while_typing(view, qtbot):
     view.open_group_inspector(group)
     editor = view.group_toolbar.title_edit
 
-    qtbot.keyClicks(editor, 'alpha')
+    for letter in 'alpha':
+        qtbot.keyClick(editor, letter)
+        # Scene changes arrive on the next event-loop turn. A burst of key
+        # events would miss the focus steal immediately after the first key.
+        qtbot.wait(20)
+        assert editor.hasFocus()
 
     assert editor.hasFocus()
     assert editor.text() == 'alpha'
     assert group.title == 'alpha'
+
+
+def test_deleting_selected_group_removes_members_and_undo_restores(view):
+    group = BeeGroupItem()
+    note = BeeTextItem('inside')
+    drawing = BeePathItem([{
+        'tool': 'line', 'style': 'solid', 'base_size': 4,
+        'color': [255, 255, 255, 255],
+        'points': [{'x': 0, 'y': 0}, {'x': 20, 'y': 10}],
+    }])
+    note.group_id = drawing.group_id = group.group_id
+    for item in (note, drawing, group):
+        view.scene.addItem(item)
+    drawing.set_shadow(dict(drawing.shadow, enabled=True))
+    group.refresh_bounds()
+    group.setSelected(True)
+    note.setSelected(True)
+
+    view.on_action_delete_items()
+
+    assert not any(item.scene() is view.scene
+                   for item in (note, drawing, group))
+    assert view.scene._shadow_composites == {}
+    view.undo_stack.undo()
+    assert all(item.scene() is view.scene
+               for item in (note, drawing, group))
+    assert len(view.scene._shadow_composites) == 1
+
+
+def test_note_reports_selection_handles_in_its_paint_bounds(view):
+    note = BeeTextItem('Resize me')
+    view.scene.addItem(note)
+    content = QtWidgets.QGraphicsTextItem.boundingRect(note)
+    note.setSelected(True)
+
+    painted = note.boundingRect()
+    assert painted.left() < content.left()
+    assert painted.top() < content.top()
+    assert painted.right() > content.right()
+    assert painted.bottom() > content.bottom()
 
 
 def test_drop_shadow_can_be_toggled_off_immediately(view):

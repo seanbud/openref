@@ -1089,11 +1089,17 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
         self._link_url = url
         return True
 
-    def boundingRect(self):
+    def bounding_rect_unselected(self):
         rect = QtWidgets.QGraphicsTextItem.boundingRect(self)
         if self.active_link_url():
             rect.adjust(0, 0, 18, 0)
         return rect
+
+    def boundingRect(self):
+        # The handles are painted outside QTextItem's document rectangle.
+        # Report that painted area to Qt so its old pixels are invalidated
+        # when a note moves, scales, or grows while text is being edited.
+        return super().boundingRect()
 
     def paint(self, painter, option, widget):
         rect = QtWidgets.QGraphicsTextItem.boundingRect(self)
@@ -1246,7 +1252,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             self.scene().undo_stack.push(
                 commands.ChangeText(self, after, before))
 
-    def apply_format(self, kind, value=None):
+    def apply_format(self, kind, value=None, record_undo=True):
         if kind == 'text_width':
             if value is None or not 120 <= float(value) <= 800:
                 raise ValueError('text_width must be between 120 and 800')
@@ -1307,7 +1313,7 @@ class BeeTextItem(BeeItemMixin, QtWidgets.QGraphicsTextItem):
             self._font_size = size
             self._set_default_font_size(size)
         self.update()
-        if not self.edit_mode and self.scene() is not None:
+        if record_undo and not self.edit_mode and self.scene() is not None:
             after = self.text_state()
             if after != before:
                 self.scene().undo_stack.push(
@@ -1991,7 +1997,10 @@ class BeeGroupItem(BeeItemMixin, QtWidgets.QGraphicsItem):
         self.title = str(state.get('title', self.title) or '')
         color = QtGui.QColor(state.get('frame_color', self.frame_color))
         if color.isValid():
-            self.frame_color = color.name()
+            name_format = (QtGui.QColor.NameFormat.HexArgb
+                           if color.alpha() < 255 else
+                           QtGui.QColor.NameFormat.HexRgb)
+            self.frame_color = color.name(name_format)
         label = QtGui.QColor(state.get('label_color', self.label_color))
         if label.isValid():
             self.label_color = label.name()

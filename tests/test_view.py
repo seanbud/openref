@@ -721,7 +721,9 @@ def test_on_action_copy_image(clipboard_mock, view, imgfilename3x3):
     clipboard_mock.return_value.mimeData.return_value = mimedata
     view.on_action_copy()
 
-    clipboard_mock.return_value.setPixmap.assert_called_once()
+    clipboard_mock.return_value.setMimeData.assert_called_once()
+    copied_mime = clipboard_mock.return_value.setMimeData.call_args.args[0]
+    assert copied_mime.hasFormat('image/png')
     view.scene.internal_clipboard == [item]
     assert mimedata.data('beeref/items') == b'1'
     view.cancel_active_modes.assert_called_once_with()
@@ -763,13 +765,35 @@ def test_on_action_copy_multiple_items_renders_one_image(clipboard_mock, view):
 
     view.on_action_copy()
 
-    copied = clipboard_mock.return_value.setPixmap.call_args.args[0].toImage()
+    copied_mime = clipboard_mock.return_value.setMimeData.call_args.args[0]
+    copied = QtGui.QImage.fromData(copied_mime.data('image/png'), 'PNG')
     assert copied.width() == 24
     assert copied.height() == 8
     assert copied.pixelColor(2, 2).name() == '#e84b5f'
     assert copied.pixelColor(16, 2).name() == '#4e8cff'
     assert set(view.scene.internal_clipboard) == {left, right}
     assert mimedata.data('beeref/items') == b'2'
+
+
+@patch('PyQt6.QtWidgets.QApplication.clipboard')
+def test_external_clipboard_selection_keeps_transparent_gaps(
+        clipboard_mock, view):
+    red = QtGui.QImage(4, 4, QtGui.QImage.Format.Format_ARGB32)
+    red.fill(QtGui.QColor('#e84b5f'))
+    left, right = BeePixmapItem(red), BeePixmapItem(red)
+    right.setPos(20, 0)
+    view.scene.addItem(left)
+    view.scene.addItem(right)
+    left.setSelected(True)
+    right.setSelected(True)
+    clipboard_mock.return_value.mimeData.return_value = QtCore.QMimeData()
+
+    view.on_action_copy()
+
+    mime = clipboard_mock.return_value.setMimeData.call_args.args[0]
+    exported = QtGui.QImage.fromData(mime.data('image/png'), 'PNG')
+    assert exported.pixelColor(10, 2).alpha() == 0
+    assert exported.pixelColor(2, 2).alpha() == 255
 
 
 def test_selection_clipboard_keeps_native_dimensions_past_legacy_cap(view):

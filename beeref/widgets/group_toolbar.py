@@ -25,13 +25,15 @@ class GroupToolbar(QtWidgets.QFrame):
 
     style_changed = QtCore.pyqtSignal(dict)
     dismissed = QtCore.pyqtSignal()
+    color_requested = QtCore.pyqtSignal()
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, color_popover=None):
         super().__init__(parent)
         self.setObjectName('groupToolbar')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._state = {}
+        self._shared_color_popover = color_popover
 
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(5, 4, 5, 4)
@@ -77,9 +79,10 @@ class GroupToolbar(QtWidgets.QFrame):
         close.clicked.connect(self._dismiss)
         layout.addWidget(close)
 
-        self.color_popover = _NoteColorPopover(parent)
-        self.color_popover.color_changed.connect(
-            lambda color: self._change(frame_color=color.name()))
+        self.color_popover = (color_popover or _NoteColorPopover(parent))
+        if color_popover is None:
+            self.color_popover.color_changed.connect(
+                lambda color: self._change(frame_color=color.name()))
         self.setStyleSheet('''
             QFrame#groupToolbar {
                 background: palette(window); border: 1px solid palette(mid);
@@ -131,6 +134,9 @@ class GroupToolbar(QtWidgets.QFrame):
         self.style_changed.emit(dict(self._state))
 
     def _show_color(self):
+        if self._shared_color_popover is not None:
+            self.color_requested.emit()
+            return
         self.color_popover.set_color(
             self._state.get('frame_color', '#8d93a8'), emit=False)
         self.color_popover.show_for(self, getattr(self, '_group_rect', None))
@@ -154,10 +160,12 @@ class GroupToolbar(QtWidgets.QFrame):
             self.title_edit.selectAll()
 
     def _dismiss(self):
-        self.color_popover.hide()
+        if self._shared_color_popover is None:
+            self.color_popover.hide()
         self.hide()
         self.dismissed.emit()
 
     def hideEvent(self, event):
-        self.color_popover.hide()
+        if self._shared_color_popover is None:
+            self.color_popover.hide()
         super().hideEvent(event)

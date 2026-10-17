@@ -39,8 +39,11 @@ class NoteEditingMixin:
         return None
 
     def init_note_tools(self):
-        self.note_toolbar = NoteToolbar(self.viewport())
+        self.note_toolbar = NoteToolbar(
+            self.viewport(), color_popover=self.color_popover)
         self.note_toolbar.format_requested.connect(self.format_note)
+        self.note_toolbar.color_requested.connect(
+            lambda: self._open_color_popover(self.note_toolbar))
         self.note_toolbar.hover_changed.connect(self.refresh_note_tools)
         self._note_toolbar_hide_timer = QtCore.QTimer(self)
         self._note_toolbar_hide_timer.setSingleShot(True)
@@ -190,20 +193,7 @@ class NoteEditingMixin:
         self.format_note('strike')
 
     def on_action_note_color(self):
-        notes = self.selected_notes()
-        if not notes:
-            return
-        popover = self.note_toolbar.color_popover
-        if popover.isVisible():
-            popover.cycle_previous()
-            return
-        note = notes[0]
-        self._note_toolbar_hide_timer.stop()
-        self.note_toolbar.set_state(note.format_state())
-        scene_rect = self.scene.itemsBoundingRect(items=notes)
-        rect = self.mapFromScene(scene_rect).boundingRect()
-        self.note_toolbar.reposition_for_rect(rect)
-        self.note_toolbar._choose_text_color()
+        self._open_color_popover()
 
     def on_action_note_appearance(self):
         if self.active_note():
