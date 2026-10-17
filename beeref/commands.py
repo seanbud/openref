@@ -61,14 +61,41 @@ class DeleteItems(QtGui.QUndoCommand):
         self.items = items
 
     def redo(self):
-        for item in self.items:
-            self.scene.removeItem(item)
+        self._apply(restore=False)
 
     def undo(self):
-        self.scene.deselect_all_items()
-        for item in self.items:
-            item.setSelected(True)
-            self.scene.addItem(item)
+        self._apply(restore=True)
+
+    def _apply(self, restore):
+        # A group can contain many shadowed items. Native Qt can re-enter a
+        # paint while a half-restored selection or shadow composite is still
+        # being built. Apply the complete scene mutation before publishing one
+        # selection and visual update.
+        previous_bulk = self.scene._bulk_selecting
+        previous_shadow_suppression = self.scene._suppress_shadow_sync
+        self.scene._bulk_selecting = True
+        self.scene._suppress_shadow_sync = True
+        blocker = QtCore.QSignalBlocker(self.scene)
+        try:
+            if restore:
+                self.scene.clearSelection()
+                for item in self.items:
+                    self.scene.addItem(item)
+                    item.setSelected(True)
+            else:
+                for item in self.items:
+                    if item.scene() is self.scene:
+                        self.scene.removeItem(item)
+        finally:
+            del blocker
+            self.scene._bulk_selecting = previous_bulk
+            self.scene._suppress_shadow_sync = previous_shadow_suppression
+        self.scene.sync_groups()
+        self.scene.sync_shadow_composites()
+        self.scene.on_selection_change()
+        self.scene.selectionChanged.emit()
+        self.scene.schedule_used_space_refresh()
+        self.scene.update()
 
 
 class ChangeZValues(QtGui.QUndoCommand):

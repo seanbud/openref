@@ -1,3 +1,22 @@
+0.8.0 beta 4
+============
+
+Fixed
+-----
+
+* Text selection handles now fall inside the item bounds reported to Qt,
+  clearing old handle pixels during dragging, proportional resizing, and
+  edits that change note size.
+* The canvas no longer steals keyboard focus after each group-title edit.
+* Deleting a selected group removes its members and their shadow layers in
+  the same undoable operation. Group deletion and restoration now batch Qt
+  scene updates, avoiding a native paint crash during shadowed undo.
+* Multi-item clipboard exports include a lossless PNG with an alpha channel,
+  preserving transparent space between selected objects in other apps.
+* Ctrl/Cmd + T opens one shared color palette for notes, drawings, and group
+  frames. Mixed note and drawing selections recolor together with one undo
+  step. The palette closes on outside clicks and selection changes.
+
 0.8.0 beta 3
 ============
 

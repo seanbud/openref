@@ -16,6 +16,7 @@ class _NoteColorPopover(QtWidgets.QFrame):
 
     color_changed = QtCore.pyqtSignal(QtGui.QColor)
     hover_changed = QtCore.pyqtSignal()
+    closed = QtCore.pyqtSignal()
 
     MAX_COLORS = 12
     COLUMNS = 6
@@ -38,11 +39,14 @@ class _NoteColorPopover(QtWidgets.QFrame):
         self._swatch_buttons = {}
 
         self.field = _SaturationValueField(self)
-        self.field.setFixedSize(178, 96)
+        self.field.setFixedSize(178, 78)
         self.field.color_changed.connect(self._field_changed)
         self.hue = _ColorChannel('hue', self)
         self.hue.setFixedWidth(178)
         self.hue.value_changed.connect(self._hue_changed)
+        self.alpha = _ColorChannel('alpha', self)
+        self.alpha.setFixedWidth(178)
+        self.alpha.value_changed.connect(self._alpha_changed)
 
         self.swatches = QtWidgets.QWidget(self)
         self.swatch_layout = QtWidgets.QGridLayout(self.swatches)
@@ -52,9 +56,10 @@ class _NoteColorPopover(QtWidgets.QFrame):
 
         layout = QtWidgets.QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
+        layout.setSpacing(4)
         layout.addWidget(self.field)
         layout.addWidget(self.hue)
+        layout.addWidget(self.alpha)
         layout.addWidget(self.swatches)
         self.setFixedWidth(194)
         self._refresh_swatches()
@@ -104,6 +109,7 @@ class _NoteColorPopover(QtWidgets.QFrame):
             button = QtWidgets.QToolButton(self.swatches)
             button.setObjectName('noteColorSwatch')
             button.setFixedSize(25, 18)
+            button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setStyleSheet(
                 self._swatch_style(value))
@@ -170,23 +176,28 @@ class _NoteColorPopover(QtWidgets.QFrame):
         self._refresh_swatches()
 
     def _field_changed(self, color):
-        color.setAlpha(255)
         self.set_color(color)
 
     def _hue_changed(self, hue):
         color = QtGui.QColor.fromHsvF(
-            hue, self.field.saturation, self.field.value, 1.0)
+            hue, self.field.saturation, self.field.value, self.field.alpha)
+        self.set_color(color)
+
+    def _alpha_changed(self, alpha):
+        color = QtGui.QColor(self._color)
+        color.setAlphaF(alpha)
         self.set_color(color)
 
     def set_color(self, color, emit=True):
         color = QtGui.QColor(color)
         if not color.isValid():
             return
-        color.setAlpha(255)
         self._color = color
         hue = color.hsvHueF()
         self.field.set_color(color)
         self.hue.set_value(hue if hue >= 0 else self.hue.value)
+        self.alpha.set_color(color)
+        self.alpha.set_value(color.alphaF())
         if emit:
             self.color_changed.emit(QtGui.QColor(color))
 
@@ -250,6 +261,7 @@ class _NoteColorPopover(QtWidgets.QFrame):
     def hideEvent(self, event):
         self._remember(self._color)
         super().hideEvent(event)
+        self.closed.emit()
 
     def enterEvent(self, event):
         self.hover_changed.emit()
@@ -265,10 +277,11 @@ class NoteToolbar(QtWidgets.QFrame):
 
     format_requested = QtCore.pyqtSignal(str, object)
     hover_changed = QtCore.pyqtSignal()
+    color_requested = QtCore.pyqtSignal()
 
     _FORMATS = ('bold', 'italic', 'underline', 'strike')
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, color_popover=None):
         super().__init__(parent)
         self.setObjectName('noteToolbar')
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -276,6 +289,7 @@ class NoteToolbar(QtWidgets.QFrame):
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self._state = {name: False for name in self._FORMATS}
         self._state['color'] = QtGui.QColor('#f3f4f6')
+        self._shared_color_popover = color_popover
         self._build_ui()
         self._apply_style()
         self.hide()
@@ -320,9 +334,11 @@ class NoteToolbar(QtWidgets.QFrame):
         layout.addWidget(self.text_color_button)
         self.buttons = self.format_buttons
 
-        self.color_popover = _NoteColorPopover(self.parentWidget())
-        self.color_popover.color_changed.connect(
-            lambda color: self._format('color', color))
+        self.color_popover = (self._shared_color_popover
+                              or _NoteColorPopover(self.parentWidget()))
+        if self._shared_color_popover is None:
+            self.color_popover.color_changed.connect(
+                lambda color: self._format('color', color))
         self.color_popover.hover_changed.connect(self.hover_changed)
 
     def _apply_style(self):
@@ -372,6 +388,9 @@ class NoteToolbar(QtWidgets.QFrame):
             self._refresh_color_button()
 
     def _choose_text_color(self):
+        if self._shared_color_popover is not None:
+            self.color_requested.emit()
+            return
         self.color_popover.set_color(self._state['color'], emit=False)
         self.color_popover.show_for(
             self, getattr(self, '_note_rect', None))
@@ -393,7 +412,8 @@ class NoteToolbar(QtWidgets.QFrame):
         self.move(x, y)
 
     def hide_popovers(self):
-        self.color_popover.hide()
+        if self._shared_color_popover is None:
+            self.color_popover.hide()
 
     def is_hovered(self):
         return self.underMouse() or self.color_popover.underMouse()
