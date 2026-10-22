@@ -77,6 +77,22 @@ def test_new_path_does_not_rewrite_completed_segments(qapp):
              for i in range(after.elementCount())])
 
 
+def test_smoothing_geometry_survives_save_data_round_trip(qapp):
+    stroke = {
+        'tool': 'pen', 'base_size': 8, 'smoothing_radius': 0.85,
+        'points': [{'x': 0, 'y': 0}, {'x': 10, 'y': 0},
+                   {'x': 20, 'y': 1}],
+    }
+    item = BeePathItem([stroke])
+    reloaded = BeePathItem.create_from_data(
+        data=item.get_extra_save_data())
+
+    assert reloaded.strokes == [stroke]
+    original_path = item._stroke_path(stroke)
+    restored_path = reloaded._stroke_path(reloaded.strokes[0])
+    assert original_path == restored_path
+
+
 def test_deep_zoom_sampling_keeps_subcentimetre_canvas_precision(view):
     view.enter_draw_mode()
     view.scale(1000, 1000)
