@@ -83,6 +83,7 @@ class DeleteItems(QtGui.QUndoCommand):
                     self.scene.addItem(item)
                     item.setSelected(True)
             else:
+                self.scene.detach_shadow_targets(self.items)
                 for item in self.items:
                     if item.scene() is self.scene:
                         self.scene.removeItem(item)

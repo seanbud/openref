@@ -904,13 +904,12 @@ def test_mouse_doubleclick_event_when_over_item(mouse_mock, view, item):
     view.scene.itemAt = MagicMock(return_value=item)
     view.fit_rect = MagicMock()
 
-    with patch.object(item, 'bounding_rect_unselected',
-                      return_value=QtCore.QRectF(0, 0, 100, 100)):
+    with patch.object(item, 'enter_crop_mode') as crop:
         view.scene.mouseDoubleClickEvent(event)
 
     assert view.scene.active_mode is None
-    view.fit_rect.assert_called_once_with(
-        QtCore.QRectF(30, 40, 100, 100), toggle_item=item)
+    crop.assert_called_once_with()
+    view.fit_rect.assert_not_called()
     mouse_mock.assert_not_called()
 
 
@@ -949,13 +948,12 @@ def test_mouse_doubleclick_event_when_item_not_selected(
     view.scene.itemAt = MagicMock(return_value=item)
     view.fit_rect = MagicMock()
 
-    with patch.object(item, 'bounding_rect_unselected',
-                      return_value=QtCore.QRectF(0, 0, 100, 100)):
+    with patch.object(item, 'enter_crop_mode') as crop:
         view.scene.mouseDoubleClickEvent(event)
 
     assert view.scene.active_mode is None
-    view.fit_rect.assert_called_once_with(
-        QtCore.QRectF(30, 40, 100, 100), toggle_item=item)
+    crop.assert_called_once_with()
+    view.fit_rect.assert_not_called()
     mouse_mock.assert_not_called()
     assert item.isSelected() is True
 

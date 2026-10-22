@@ -85,7 +85,10 @@ class _ShadowCompositeItem(QtWidgets.QGraphicsItemGroup):
         for target, proxy in list(self.proxies.items()):
             if target not in wanted:
                 self.removeFromGroup(proxy)
-                proxy.setParentItem(None)
+                scene = proxy.scene()
+                if scene is not None:
+                    scene.removeItem(proxy)
+                    scene.retire_shadow_proxy(proxy)
                 del self.proxies[target]
         for target in members:
             proxy = self.proxies.get(target)
@@ -113,20 +116,19 @@ class _ShadowCompositeItem(QtWidgets.QGraphicsItemGroup):
             self.setZValue(z_value)
 
     def dispose(self, scene):
-        """Detach native effect and proxy ownership before removing a layer."""
+        """Retire a layer without destroying Qt paint objects mid-frame."""
 
-        # Qt owns graphics effects and item-group children.  Removing a group
-        # with both still attached can make the native wrappers race during a
-        # rapid shadow on/off toggle.  Tear the ownership graph down in a
-        # deterministic order first.
-        self.setGraphicsEffect(None)
+        self.setVisible(False)
         for proxy in list(self.proxies.values()):
             self.removeFromGroup(proxy)
             if proxy.scene() is scene:
                 scene.removeItem(proxy)
+            scene.retire_shadow_proxy(proxy)
         self.proxies.clear()
         if self.scene() is scene:
             scene.removeItem(self)
+        scene._retired_shadow_composites.append(self)
+        scene._shadow_retirement_timer.start(500)
 
 
 class BeeGraphicsScene(QtWidgets.QGraphicsScene):
@@ -156,6 +158,8 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._shadow_suspension_reasons = set()
         self._shadow_geometry_dirty = False
         self._shadow_composites = {}
+        self._retired_shadow_composites = []
+        self._retired_shadow_proxies = []
         self._rubberband_selection_mode = 'replace'
         self._rubberband_base_selection = set()
         self._bulk_selecting = False
@@ -165,6 +169,10 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._shadow_resume_timer.setSingleShot(True)
         self._shadow_resume_timer.timeout.connect(
             self._restore_shadow_rendering)
+        self._shadow_retirement_timer = QtCore.QTimer(self)
+        self._shadow_retirement_timer.setSingleShot(True)
+        self._shadow_retirement_timer.timeout.connect(
+            self._clear_retired_shadow_items)
         self._used_space_refresh_timer = QtCore.QTimer(self)
         self._used_space_refresh_timer.setSingleShot(True)
         self._used_space_refresh_timer.timeout.connect(self.expand_used_space)
@@ -175,17 +183,29 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         self._clear_ongoing = True
         self._used_space_refresh_timer.stop()
         self._shadow_resume_timer.stop()
+        self._shadow_retirement_timer.stop()
         super().clear()
         self._shadow_suspension_reasons = set()
         self._shadow_rendering_suspended = False
         self._shadow_geometry_dirty = False
         self._shadow_composites = {}
+        self._retired_shadow_composites = []
+        self._retired_shadow_proxies = []
         self.used_space_rect = QtCore.QRectF()
         self.internal_clipboard = []
         self.active_group_id = None
         self.rubberband_item = RubberbandItem()
         self.multi_select_item = MultiSelectItem()
         self._clear_ongoing = False
+
+    def _clear_retired_shadow_items(self):
+        """Release off-scene paint objects after queued view updates settle."""
+        self._retired_shadow_proxies.clear()
+        self._retired_shadow_composites.clear()
+
+    def retire_shadow_proxy(self, proxy):
+        self._retired_shadow_proxies.append(proxy)
+        self._shadow_retirement_timer.start(500)
 
     @staticmethod
     def _padded_content_rect(rect):
@@ -238,9 +258,30 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
     def removeItem(self, item):
         logger.debug(f'Removing item {item}')
         had_shadow = self._item_has_shadow(item)
+        if had_shadow:
+            self.detach_shadow_targets((item,))
         super().removeItem(item)
         if had_shadow:
             self.sync_shadow_composites()
+
+    def detach_shadow_targets(self, targets):
+        """Drop shadow proxies while their source items are still in scene.
+
+        A proxy paints through its source item. Removing the source first can
+        leave Qt painting through an invalid graphics-item ownership graph.
+        """
+        targets = set(targets)
+        for shadow_id, composite in list(self._shadow_composites.items()):
+            remaining = [item for item in composite.proxies
+                         if item not in targets]
+            if len(remaining) == len(composite.proxies):
+                continue
+            composite.setVisible(False)
+            if remaining:
+                composite.sync(remaining, self.Z_STEP)
+            else:
+                composite.dispose(self)
+                del self._shadow_composites[shadow_id]
 
     def _item_has_shadow(self, item):
         """Return whether an item participates in a rendered shadow layer."""
@@ -311,10 +352,10 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
             else self.selection_with_group_contents())
 
     def group_selection(self):
-        """Create a persistent frame around two or more selected items."""
+        """Create a persistent frame around one or more selected items."""
         members = [item for item in self.selectedItems(user_only=True)
                    if getattr(item, 'TYPE', None) != 'group']
-        if len(members) < 2:
+        if not members:
             return False
         group = item_registry['group']()
         group.setZValue(min(item.zValue() for item in members) - self.Z_STEP)
@@ -965,6 +1006,13 @@ class BeeGraphicsScene(QtWidgets.QGraphicsScene):
         if item:
             if getattr(item, 'TYPE', None) == 'path':
                 self.views()[0].enter_draw_mode(item)
+                event.accept()
+                return
+            if getattr(item, 'TYPE', None) == 'pixmap':
+                if not item.isSelected():
+                    self.deselect_all_items()
+                    item.setSelected(True)
+                item.enter_crop_mode()
                 event.accept()
                 return
             if getattr(item, 'TYPE', None) == 'group':

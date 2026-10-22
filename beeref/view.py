@@ -655,7 +655,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if self.scene.group_selection():
             self.show_feedback('Grouped selection', '▢', 'group_selection')
         else:
-            self.show_feedback('Select two or more items to group', '!',
+            self.show_feedback('Select an item to group', '!',
                                duration=1800)
 
     def on_action_remove_from_group(self):
@@ -2037,6 +2037,13 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                     inside_palette = True
                     break
                 widget = widget.parentWidget()
+            # macOS can route a click on a child control through the viewport
+            # or its native window first. The pointer position, not the event
+            # receiver, determines whether this is an outside click.
+            if hasattr(event, 'globalPosition'):
+                inside_palette |= self.color_popover.rect().contains(
+                    self.color_popover.mapFromGlobal(
+                        event.globalPosition().toPoint()))
             if not inside_palette:
                 self.color_popover.hide()
         if (getattr(self, '_color_session', None) is not None
