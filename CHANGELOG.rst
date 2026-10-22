@@ -1,3 +1,31 @@
+0.8.0 beta 6
+============
+
+Drawing
+-------
+
+* New pen strokes receive a restrained, causal smoothing pass. Tiny sideways
+  wobble is reduced by less than one screen pixel; completed segments never
+  move in response to later samples. Sharp corners, reversals, and sparse
+  fast input remain uncorrected.
+* Sampling and stroke width now use the effective item-and-camera scale.
+  Fractional pointer positions are retained at deep zoom, and the mouse-up
+  position is captured as the final stroke point.
+* Existing saved drawings retain their prior geometry and rendering.
+
+0.8.0 beta 5
+============
+
+Fixed
+-----
+
+* Deleting and undoing shadowed images, notes, and drawings no longer releases
+  native shadow paint objects during a queued repaint.
+* Clicks inside the color palette remain inside even if Qt reports the
+  viewport as the event receiver.
+* Mixed text-and-drawing selections recolor together while a note is editing.
+* Double-click an image to crop it; a single selected item can be grouped.
+
 0.8.0 beta 4
 ============
 

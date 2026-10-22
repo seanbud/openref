@@ -41,6 +41,7 @@ from beeref.items import BeePixmapItem, BeePathItem
 from beeref.main_controls import MainControlsMixin
 from beeref.notes import NoteEditingMixin
 from beeref.scene import BeeGraphicsScene
+from beeref import stroke_smoothing
 from beeref.utils import get_file_extension_from_format, qcolor_to_hex
 
 
@@ -1240,21 +1241,61 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         if self.draw_item is None:
             self._new_drawing_at(scene_pos)
         local_pos = self.draw_item.mapFromScene(scene_pos)
+        item_to_screen = max(
+            abs(self.get_scale() * self.draw_item.scale()), 1e-9)
         point = {
-            'x': round(local_pos.x(), 2),
-            'y': round(local_pos.y(), 2),
+            'x': local_pos.x(),
+            'y': local_pos.y(),
             'pressure': max(0.05, self._tablet_pressure),
         }
         self.draw_current_stroke = {
             'tool': self.draw_tool,
             'style': self.draw_style,
             'color': list(self.draw_brush_color),
-            'base_size': self.draw_brush_size / max(self.get_scale(), 0.0001),
+            'base_size': self.draw_brush_size / item_to_screen,
             'points': [point],
         }
+        if self.draw_tool == 'pen':
+            self.draw_current_stroke['smoothing_radius'] = (
+                stroke_smoothing.local_smoothing_radius(
+                    self.draw_brush_size, item_to_screen))
         self.draw_item.prepareGeometryChange()
         self.draw_item.temp_stroke = self.draw_current_stroke
         self.draw_item.update()
+
+    def _scene_pos_from_pointer(self, event):
+        """Map fractional pointer coordinates without pixel quantization."""
+
+        return self.viewportTransform().inverted()[0].map(event.position())
+
+    def _append_pen_sample(self, local_pos, pressure, force=False):
+        """Append a pen point without changing any completed ink geometry."""
+
+        points = self.draw_current_stroke['points']
+        previous = BeePathItem._point(points[-1])
+        item_to_screen = max(
+            abs(self.get_scale() * self.draw_item.scale()), 1e-9)
+        distance_px = math.hypot(
+            local_pos.x() - previous.x(),
+            local_pos.y() - previous.y()) * item_to_screen
+        threshold = (0.1 if force
+                     else stroke_smoothing.SAMPLE_SPACING_PX)
+        if distance_px < threshold:
+            return False
+        if len(points) >= 2 and not force:
+            before = BeePathItem._point(points[-2])
+            radius = stroke_smoothing.local_smoothing_radius(
+                self.draw_brush_size * max(0.05, pressure),
+                item_to_screen)
+            local_pos = stroke_smoothing.smooth_sample(
+                before, previous, local_pos, radius, item_to_screen)
+        self.draw_item.prepareGeometryChange()
+        points.append({
+            'x': local_pos.x(), 'y': local_pos.y(),
+            'pressure': max(0.05, pressure),
+        })
+        self.draw_item.update()
+        return True
 
     def on_items_loaded(self, value):
         logger.debug('On items loaded: add queued items')
@@ -2154,7 +2195,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                         & self.keyboard_settings.temporary_eraser_qt_modifier):
                     self._temporary_eraser_tool = 'pen'
                     self.set_draw_tool('eraser', announce=False)
-                scene_pos = self.mapToScene(event.pos())
+                scene_pos = self._scene_pos_from_pointer(event)
                 if self.draw_tool == 'eraser':
                     self._begin_eraser(scene_pos, event.position())
                 else:
@@ -2246,13 +2287,13 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 and self.draw_tool == 'eraser'
                 and event.buttons() & Qt.MouseButton.LeftButton):
             self._preview_erase_at(
-                self.mapToScene(event.pos()), event.position())
+                self._scene_pos_from_pointer(event), event.position())
             event.accept()
             return
 
         if (self.active_mode == self.DRAW_MODE
                 and self.draw_current_stroke is not None):
-            scene_pos = self.mapToScene(event.pos())
+            scene_pos = self._scene_pos_from_pointer(event)
             local_pos = self.draw_item.mapFromScene(scene_pos)
             start = BeePathItem._point(
                 self.draw_current_stroke['points'][0])
@@ -2260,29 +2301,23 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
                 local_pos = self._constrained_point(
                     start, local_pos, self.draw_tool)
             point = {
-                'x': round(local_pos.x(), 2),
-                'y': round(local_pos.y(), 2),
+                'x': local_pos.x(),
+                'y': local_pos.y(),
                 'pressure': self._tablet_pressure,
             }
-            self.draw_item.prepareGeometryChange()
             points = self.draw_current_stroke['points']
             if self.draw_tool == 'pen' and not (
                     event.modifiers()
                     & Qt.KeyboardModifier.ShiftModifier):
-                previous = BeePathItem._point(points[-1])
-                sample_distance = max(
-                    0.25,
-                    1.2 / max(self.get_scale() * self.draw_item.scale(),
-                              0.0001))
-                if ((local_pos - previous).manhattanLength()
-                        >= sample_distance):
-                    points.append(point)
-            elif len(points) == 1:
-                points.append(point)
+                self._append_pen_sample(local_pos, self._tablet_pressure)
             else:
-                points[-1] = point
+                self.draw_item.prepareGeometryChange()
+                if len(points) == 1:
+                    points.append(point)
+                else:
+                    points[-1] = point
+                self.draw_item.update()
             self.draw_item.temp_stroke = self.draw_current_stroke
-            self.draw_item.update()
             event.accept()
             return
 
@@ -2344,6 +2379,12 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             return
         if (self.active_mode == self.DRAW_MODE
                 and self.draw_current_stroke is not None):
+            if (self.draw_tool == 'pen'
+                    and isinstance(event, QtGui.QMouseEvent)):
+                scene_pos = self._scene_pos_from_pointer(event)
+                self._append_pen_sample(
+                    self.draw_item.mapFromScene(scene_pos),
+                    self._tablet_pressure, force=True)
             self.draw_item.add_stroke(self.draw_current_stroke)
             self.draw_item.temp_stroke = None
             self.draw_current_stroke = None
