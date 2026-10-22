@@ -60,10 +60,12 @@ class NoteEditingMixin:
         return None
 
     def selected_notes(self):
-        if isinstance(self.scene.edit_item, BeeTextItem):
-            return [self.scene.edit_item]
-        return [item for item in self.scene.selectedItems(user_only=True)
-                if isinstance(item, BeeTextItem)]
+        notes = [item for item in self.scene.selectedItems(user_only=True)
+                 if isinstance(item, BeeTextItem)]
+        editing = self.scene.edit_item
+        if isinstance(editing, BeeTextItem) and editing not in notes:
+            notes.append(editing)
+        return notes
 
     def refresh_note_tools(self):
         if not hasattr(self, 'note_toolbar'):

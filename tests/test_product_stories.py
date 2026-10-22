@@ -171,6 +171,117 @@ def test_shared_palette_closes_on_outside_click(view, qtbot):
     assert not view.color_popover.isVisible()
 
 
+def test_shared_palette_keeps_clicks_inside_when_native_target_is_viewport(
+        view):
+    note = BeeTextItem('Color me')
+    view.scene.addItem(note)
+    note.setSelected(True)
+    view.show()
+    view.on_action_note_color()
+    assert view.color_popover.isVisible()
+    global_pos = view.color_popover.mapToGlobal(
+        view.color_popover.rect().center())
+    event = QtGui.QMouseEvent(
+        QtCore.QEvent.Type.MouseButtonPress,
+        QtCore.QPointF(view.viewport().mapFromGlobal(global_pos)),
+        QtCore.QPointF(global_pos), Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier)
+
+    view.eventFilter(view.viewport(), event)
+
+    assert view.color_popover.isVisible()
+
+
+def test_color_palette_recolors_mixed_selection_while_note_is_editing(view):
+    note = BeeTextItem('Color me')
+    other_note = BeeTextItem('And me')
+    drawing = BeePathItem([{
+        'tool': 'line', 'style': 'solid', 'base_size': 4,
+        'color': [255, 255, 255, 255],
+        'points': [{'x': 0, 'y': 0}, {'x': 30, 'y': 0}],
+    }])
+    for item in (note, other_note, drawing):
+        view.scene.addItem(item)
+        item.setSelected(True)
+    view.scene.edit_item = note
+
+    view.on_action_note_color()
+    assert set(view._color_session['notes']) == {note, other_note}
+    assert set(view._color_session['paths']) == {drawing}
+    view.color_popover.set_color(QtGui.QColor('#e34f7b'))
+    view.color_popover.hide()
+
+    assert drawing.strokes[0]['color'] == [227, 79, 123, 255]
+    for item in (note, other_note):
+        color = (item.document().firstBlock().begin().fragment()
+                 .charFormat().foreground().color())
+        assert color.name() == '#e34f7b'
+    view.scene.edit_item = None
+
+
+def test_one_selected_item_can_be_grouped_and_undone(view):
+    note = BeeTextItem('Solo')
+    view.scene.addItem(note)
+    note.setSelected(True)
+
+    assert view.scene.group_selection()
+    group = next(view.scene.items_by_type('group'))
+    assert note.group_id == group.group_id
+    view.undo_stack.undo()
+    assert note.group_id is None
+    assert group.scene() is None
+
+
+@pytest.mark.parametrize('item_type', ('pixmap', 'text', 'path'))
+def test_deleting_single_shadowed_item_before_proxy_teardown_is_safe(
+        view, qtbot, item_type):
+    if item_type == 'pixmap':
+        image = QtGui.QImage(20, 20, QtGui.QImage.Format.Format_ARGB32)
+        image.fill(QtGui.QColor('#ff789a'))
+        item = BeePixmapItem(image)
+    elif item_type == 'text':
+        item = BeeTextItem('Shadowed note')
+    else:
+        item = BeePathItem([{
+            'tool': 'line', 'style': 'solid', 'base_size': 4,
+            'color': [255, 255, 255, 255],
+            'points': [{'x': 0, 'y': 0}, {'x': 30, 'y': 0}],
+        }])
+    view.scene.addItem(item)
+    item.setSelected(True)
+    assert view.scene.toggle_shadows()
+    for _ in range(3):
+        view.on_action_delete_items()
+        assert view.scene._shadow_composites == {}
+        qtbot.wait(1)
+        view.undo_stack.undo()
+        assert item.scene() is view.scene
+        assert len(view.scene._shadow_composites) == 1
+        qtbot.wait(1)
+    qtbot.wait(550)
+    assert view.scene._retired_shadow_composites == []
+
+
+def test_deleting_one_member_of_shared_shadow_leaves_no_ghost_proxy(
+        view, qtbot):
+    first = BeeTextItem('First')
+    second = BeeTextItem('Second')
+    for item in (first, second):
+        view.scene.addItem(item)
+        item.setSelected(True)
+    assert view.scene.toggle_shadows()
+    first.setSelected(False)
+    view.on_action_delete_items()
+
+    composite = next(iter(view.scene._shadow_composites.values()))
+    assert set(composite.proxies) == {first}
+    assert all(proxy.scene() is None
+               for proxy in view.scene._retired_shadow_proxies)
+    qtbot.wait(550)
+    view.undo_stack.undo()
+    assert set(composite.proxies) == {first, second}
+
+
 def test_group_frame_color_uses_shared_palette(view):
     group = BeeGroupItem()
     view.scene.addItem(group)
