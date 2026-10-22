@@ -35,6 +35,7 @@ from beeref import commands
 from beeref.config import BeeSettings
 from beeref.constants import COLORS
 from beeref.selection import SelectableMixin
+from beeref.stroke_smoothing import causal_curve_controls
 
 
 logger = logging.getLogger(__name__)
@@ -1605,6 +1606,16 @@ class BeePathItem(BeeItemMixin, QtWidgets.QGraphicsItem):
                 path.lineTo(start + QtCore.QPointF(0.01, 0.01))
             elif len(points) == 2:
                 path.lineTo(end)
+            elif stroke.get('smoothing_radius') is not None:
+                # New strokes use bounded, causal tangents. Older saved marks
+                # keep their original geometry to preserve existing boards.
+                raw = [self._point(point) for point in points]
+                path.lineTo(raw[1])
+                radius = max(0.0, float(stroke['smoothing_radius']))
+                for index in range(2, len(raw)):
+                    control_1, control_2 = causal_curve_controls(
+                        raw[index - 2], raw[index - 1], raw[index], radius)
+                    path.cubicTo(control_1, control_2, raw[index])
             else:
                 # Use a causal curve: each completed segment depends only on
                 # points already received.  The previous implementation used
