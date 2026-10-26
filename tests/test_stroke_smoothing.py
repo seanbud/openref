@@ -2,6 +2,8 @@
 
 import math
 
+import pytest
+
 from PyQt6 import QtCore, QtGui
 
 from beeref.items import BeePathItem
@@ -159,3 +161,38 @@ def test_release_captures_pointer_endpoint_even_after_sparse_motion(view):
     tip = item.strokes[0]['points'][-1]
     assert math.isclose(tip['x'], scene_end.x(), abs_tol=1e-5)
     assert math.isclose(tip['y'], scene_end.y(), abs_tol=1e-5)
+
+
+@pytest.mark.parametrize('release_modifiers', (
+    QtCore.Qt.KeyboardModifier.ShiftModifier,
+    QtCore.Qt.KeyboardModifier.NoModifier,
+))
+def test_shift_constrained_pen_release_does_not_add_off_axis_tail(
+        view, release_modifiers):
+    view.enter_draw_mode()
+    view._begin_mark(QtCore.QPointF(0, 0))
+    move_pos = view.viewportTransform().map(QtCore.QPointF(100, 10))
+    move = QtGui.QMouseEvent(
+        QtCore.QEvent.Type.MouseMove, move_pos, move_pos,
+        QtCore.Qt.MouseButton.NoButton,
+        QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.KeyboardModifier.ShiftModifier)
+    view.mouseMoveEvent(move)
+    assert view._draw_shift_constrained
+
+    release_pos = view.viewportTransform().map(QtCore.QPointF(110, 12))
+    release = QtGui.QMouseEvent(
+        QtCore.QEvent.Type.MouseButtonRelease,
+        release_pos, release_pos,
+        QtCore.Qt.MouseButton.LeftButton,
+        QtCore.Qt.MouseButton.NoButton,
+        release_modifiers)
+    view.mouseReleaseEvent(release)
+
+    item = next(item for item in view.scene.items()
+                if isinstance(item, BeePathItem))
+    points = item.strokes[0]['points']
+    assert len(points) == 2
+    assert math.isclose(points[0]['y'], points[1]['y'], abs_tol=1e-7)
+    assert points[-1]['x'] > 100
+    assert not view._draw_shift_constrained
