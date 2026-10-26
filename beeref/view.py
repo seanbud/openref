@@ -91,6 +91,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         self._syncing_actions = False
         self.draw_item = None
         self.draw_current_stroke = None
+        self._draw_shift_constrained = False
         self.draw_brush_size = 8.0
         stored_color = QtGui.QColor(self.settings.value(
             'Drawing/default_color', '#EBEBEE'))
@@ -894,6 +895,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             self.draw_item = None
         self._draw_editing_existing = False
         self._draw_original_strokes = None
+        self._draw_shift_constrained = False
         self._draw_panning = False
         self.active_mode = None
         self.draw_toolbar.hide()
@@ -1255,6 +1257,7 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             'base_size': self.draw_brush_size / item_to_screen,
             'points': [point],
         }
+        self._draw_shift_constrained = False
         if self.draw_tool == 'pen':
             self.draw_current_stroke['smoothing_radius'] = (
                 stroke_smoothing.local_smoothing_radius(
@@ -1296,6 +1299,21 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
         })
         self.draw_item.update()
         return True
+
+    def _set_current_stroke_tip(self, local_pos, pressure):
+        """Replace the preview tip, including the constrained mouse-up tip."""
+
+        self.draw_item.prepareGeometryChange()
+        point = {
+            'x': local_pos.x(), 'y': local_pos.y(),
+            'pressure': pressure,
+        }
+        points = self.draw_current_stroke['points']
+        if len(points) == 1:
+            points.append(point)
+        else:
+            points[-1] = point
+        self.draw_item.update()
 
     def on_items_loaded(self, value):
         logger.debug('On items loaded: add queued items')
@@ -2297,26 +2315,16 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             local_pos = self.draw_item.mapFromScene(scene_pos)
             start = BeePathItem._point(
                 self.draw_current_stroke['points'][0])
-            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            self._draw_shift_constrained = bool(
+                event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            if self._draw_shift_constrained:
                 local_pos = self._constrained_point(
                     start, local_pos, self.draw_tool)
-            point = {
-                'x': local_pos.x(),
-                'y': local_pos.y(),
-                'pressure': self._tablet_pressure,
-            }
-            points = self.draw_current_stroke['points']
-            if self.draw_tool == 'pen' and not (
-                    event.modifiers()
-                    & Qt.KeyboardModifier.ShiftModifier):
+            if self.draw_tool == 'pen' and not self._draw_shift_constrained:
                 self._append_pen_sample(local_pos, self._tablet_pressure)
             else:
-                self.draw_item.prepareGeometryChange()
-                if len(points) == 1:
-                    points.append(point)
-                else:
-                    points[-1] = point
-                self.draw_item.update()
+                self._set_current_stroke_tip(local_pos,
+                                             self._tablet_pressure)
             self.draw_item.temp_stroke = self.draw_current_stroke
             event.accept()
             return
@@ -2382,12 +2390,22 @@ class BeeGraphicsView(NoteEditingMixin, MainControlsMixin,
             if (self.draw_tool == 'pen'
                     and isinstance(event, QtGui.QMouseEvent)):
                 scene_pos = self._scene_pos_from_pointer(event)
-                self._append_pen_sample(
-                    self.draw_item.mapFromScene(scene_pos),
-                    self._tablet_pressure, force=True)
+                local_pos = self.draw_item.mapFromScene(scene_pos)
+                if (event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+                        or self._draw_shift_constrained):
+                    start = BeePathItem._point(
+                        self.draw_current_stroke['points'][0])
+                    self._set_current_stroke_tip(
+                        self._constrained_point(
+                            start, local_pos, self.draw_tool),
+                        self._tablet_pressure)
+                else:
+                    self._append_pen_sample(
+                        local_pos, self._tablet_pressure, force=True)
             self.draw_item.add_stroke(self.draw_current_stroke)
             self.draw_item.temp_stroke = None
             self.draw_current_stroke = None
+            self._draw_shift_constrained = False
             self._tablet_pressure = 1.0
             if not self._draw_editing_existing:
                 completed_item = self.draw_item
