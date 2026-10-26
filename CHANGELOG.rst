@@ -1,3 +1,12 @@
+0.8.0 beta 7
+============
+
+Fixed
+-----
+
+* Releasing a Shift-constrained pen stroke no longer appends an off-axis
+  freehand tail. The final point follows the same constraint as the preview.
+
 0.8.0 beta 6
 ============
 
